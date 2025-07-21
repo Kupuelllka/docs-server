@@ -1,0 +1,340 @@
+openapi: 3.0.3
+info:
+  title: API для управления документами
+  description: |
+    Система для хранения и обмена электронными документами с аутентификацией пользователей.
+    Позволяет загружать, просматривать, скачивать и удалять документы.
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:8080/api
+    description: Локальный сервер разработки
+
+tags:
+  - name: Пользователи
+    description: Управление учетными записями пользователей
+  - name: Документы
+    description: Управление электронными документами
+
+paths:
+  /register:
+    post:
+      tags: [Пользователи]
+      summary: Регистрация нового пользователя
+      description: |
+        Создание новой учетной записи пользователя.
+        Требуется токен администратора.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                token:
+                  type: string
+                  description: Секретный токен администратора
+                  example: "admin-secret-token"
+                login:
+                  type: string
+                  description: Логин (мин. 8 символов, латиница и цифры)
+                  example: "user12345"
+                pswd:
+                  type: string
+                  description: |
+                    Пароль (мин. 8 символов, минимум:
+                    - 2 буквы в разных регистрах
+                    - 1 цифра
+                    - 1 спецсимвол)
+                  example: "Secur3P@ss"
+              required: [token, login, pswd]
+      responses:
+        '200':
+          description: Успешная регистрация
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegistrationResponse'
+        '400':
+          description: Неверные входные данные
+        '401':
+          description: Неверный токен администратора
+        '500':
+          description: Ошибка сервера
+
+  /auth:
+    post:
+      tags: [Пользователи]
+      summary: Аутентификация пользователя
+      description: Получение токена доступа по логину и паролю
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                login:
+                  type: string
+                  example: "user12345"
+                pswd:
+                  type: string
+                  example: "Secur3P@ss"
+              required: [login, pswd]
+      responses:
+        '200':
+          description: Успешная аутентификация
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          description: Неверные учетные данные
+        '401':
+          description: Не авторизован
+
+  /docs:
+    post:
+      tags: [Документы]
+      summary: Загрузка документа
+      description: |
+        Загрузка нового документа в систему.
+        Поддерживает загрузку файлов и JSON-данных.
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                meta:
+                  type: string
+                  description: |
+                    Метаданные документа в формате JSON:
+                    {
+                      "name": "название",
+                      "public": false,
+                      "mime": "тип содержимого",
+                      "grant": ["список", "логинов"]
+                    }
+                  example: '{"name":"отчет.pdf","public":false,"mime":"application/pdf"}'
+                file:
+                  type: string
+                  format: binary
+                  description: Файл документа (опционально)
+      responses:
+        '200':
+          description: Документ успешно загружен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentUploadResponse'
+        '400':
+          description: Ошибка в формате запроса
+        '401':
+          description: Требуется авторизация
+        '413':
+          description: Превышен максимальный размер файла
+        '500':
+          description: Ошибка сервера
+
+    get:
+      tags: [Документы]
+      summary: Получить список документов
+      description: |
+        Возвращает список документов с пагинацией.
+        Можно фильтровать по владельцу.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: login
+          in: query
+          description: Фильтр по владельцу (логину)
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: Количество документов в ответе
+          schema:
+            type: integer
+            default: 10
+      responses:
+        '200':
+          description: Успешный запрос
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentListResponse'
+        '401':
+          description: Требуется авторизация
+        '500':
+          description: Ошибка сервера
+
+  /docs/{id}:
+    get:
+      tags: [Документы]
+      summary: Получить документ
+      description: |
+        Возвращает документ по ID.
+        Для файлов - скачивание, для JSON - данные.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Идентификатор документа
+          schema:
+            type: string
+          example: "qwdj1q4o34u341h759ou1"
+      responses:
+        '200':
+          description: Успешный запрос
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Document'
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '403':
+          description: Нет прав доступа
+        '404':
+          description: Документ не найден
+
+    delete:
+      tags: [Документы]
+      summary: Удалить документ
+      description: Удаление документа по ID
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Идентификатор документа
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Документ удален
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteResponse'
+        '403':
+          description: Нет прав доступа
+        '404':
+          description: Документ не найден
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: |
+        Токен доступа, полученный при аутентификации.
+        Формат: "Bearer <token>"
+
+  schemas:
+    AuthResponse:
+      type: object
+      properties:
+        response:
+          type: object
+          properties:
+            token:
+              type: string
+              description: Токен для авторизованных запросов
+              example: "sfuqwejqjoin93e29"
+
+    RegistrationResponse:
+      type: object
+      properties:
+        response:
+          type: object
+          properties:
+            login:
+              type: string
+              example: "user12345"
+
+    Document:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Уникальный идентификатор
+        name:
+          type: string
+          description: Название документа
+        mime:
+          type: string
+          description: MIME-тип содержимого
+        file:
+          type: boolean
+          description: Флаг файлового документа
+        public:
+          type: boolean
+          description: Доступен ли публично
+        created:
+          type: string
+          format: date-time
+          description: Дата создания
+        grant:
+          type: array
+          items:
+            type: string
+          description: Список логинов с доступом
+
+    DocumentUploadResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            json:
+              type: object
+              description: Метаданные документа
+            file:
+              type: string
+              description: Имя загруженного файла
+
+    DocumentListResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            docs:
+              type: array
+              items:
+                $ref: '#/components/schemas/Document'
+
+    DeleteResponse:
+      type: object
+      properties:
+        response:
+          type: object
+          additionalProperties:
+            type: boolean
+          description: Статус удаления по ID документа
+          example: {"qwdj1q4o34u341h759ou1": true}
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: integer
+              description: Код ошибки
+            text:
+              type: string
+              description: Описание ошибки
+          example:
+            code: 403
+            text: "Доступ запрещен"
