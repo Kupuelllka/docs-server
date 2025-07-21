@@ -5,7 +5,10 @@ import (
 	"docs-server/internal/cache"
 	"docs-server/internal/model"
 	"docs-server/internal/repository"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"mime"
 	"os"
 	"path/filepath"
 	"time"
@@ -45,43 +48,76 @@ func (s *DocumentService) UploadDocument(token string, meta string, files []*mod
 	}
 
 	// 2. Парсинг метаданных
-	// (Добавить парсинга JSON из строки meta)
+	var metaData struct {
+		Name   string      `json:"name"`
+		Public bool        `json:"public"`
+		Mime   string      `json:"mime"`
+		Grant  []string    `json:"grant"`
+		JSON   interface{} `json:"json"`
+	}
+
+	if err := json.Unmarshal([]byte(meta), &metaData); err != nil {
+		return nil, fmt.Errorf("invalid meta format: %v", err)
+	}
+
+	// Валидация обязательных полей
+	if metaData.Name == "" {
+		return nil, errors.New("document name is required")
+	}
 
 	// 3. Сохранение файла (если есть)
 	var filePath string
 	if len(files) > 0 {
-		uploadDir := "uploads"
-		if err := os.MkdirAll(uploadDir, 0755); err != nil {
-			return nil, err
+		// Автоматическое определение MIME-типа для файлов
+		if metaData.Mime == "" {
+			metaData.Mime = mime.TypeByExtension(filepath.Ext(files[0].Filename))
+			if metaData.Mime == "" {
+				metaData.Mime = "application/octet-stream"
+			}
 		}
 
-		file := files[0]
-		filePath = filepath.Join(uploadDir, file.Filename)
-		if err := os.WriteFile(filePath, file.Data, 0644); err != nil {
-			return nil, err
+		// Создаем директорию для загрузки
+		if err := os.MkdirAll(s.uploadDir, 0755); err != nil {
+			return nil, fmt.Errorf("failed to create upload directory: %v", err)
+		}
+
+		// Генерируем уникальное имя файла
+		fileExt := filepath.Ext(files[0].Filename)
+		fileName := uuid.New().String() + fileExt
+		filePath = filepath.Join(s.uploadDir, fileName)
+
+		// Сохраняем файл
+		if err := os.WriteFile(filePath, files[0].Data, 0644); err != nil {
+			return nil, fmt.Errorf("failed to save file: %v", err)
+		}
+	} else {
+		// Для JSON-документов
+		if metaData.Mime == "" {
+			metaData.Mime = "application/json"
 		}
 	}
-	// генерим uuid
-	uuid, err := generateID()
-	if err != nil {
-		return nil, err
-	}
+
 	// 4. Создание документа
 	doc := &model.Document{
-		ID:       uuid,
-		Name:     "example",                  // Добавить из meta
-		Mime:     "application/octet-stream", // Добавить из meta или файла
+		ID:       uuid.New().String(),
+		Name:     metaData.Name,
+		Mime:     metaData.Mime,
 		File:     len(files) > 0,
-		Public:   false, // Добавить из meta
+		Public:   metaData.Public,
 		Created:  time.Now(),
 		Owner:    user.ID,
 		FilePath: filePath,
-		JSONData: nil, // Добавить из meta или отдельного поля
+		JSONData: metaData.JSON,
+		Grant:    metaData.Grant,
 	}
 
 	// 5. Сохранение в БД
 	if err := s.docRepo.CreateDocument(context.Background(), doc); err != nil {
-		return nil, err
+		// Удаляем сохраненный файл в случае ошибки
+		if filePath != "" {
+			os.Remove(filePath)
+		}
+		return nil, fmt.Errorf("failed to create document: %v", err)
 	}
 
 	// 6. Инвалидация кеша
