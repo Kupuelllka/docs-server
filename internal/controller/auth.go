@@ -7,6 +7,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
+// AuthController авторизация
 type AuthController struct {
 	authService *service.AuthService
 }
@@ -19,6 +20,7 @@ func (c *AuthController) GetAuthService() *service.AuthService {
 	return c.authService
 }
 
+// Register установить маршруты для авторизации
 func (c *AuthController) Register(ctx *fiber.Ctx) error {
 	type RegisterRequest struct {
 		Token string `json:"token"`
@@ -42,6 +44,7 @@ func (c *AuthController) Register(ctx *fiber.Ctx) error {
 	})
 }
 
+// Authenticate установить авторизацию
 func (c *AuthController) Authenticate(ctx *fiber.Ctx) error {
 	type AuthRequest struct {
 		Login string `json:"login"`
@@ -65,6 +68,7 @@ func (c *AuthController) Authenticate(ctx *fiber.Ctx) error {
 	})
 }
 
+// Logout выйти из системы
 func (c *AuthController) Logout(ctx *fiber.Ctx) error {
 	token := ctx.Params("token")
 	if token == "" {

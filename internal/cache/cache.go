@@ -23,21 +23,21 @@ func NewMemoryCache() *MemoryCache {
 	return cache
 }
 
+// Set Добавить элемент в кэш
 func (c *MemoryCache) Set(key string, value interface{}, duration time.Duration) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	c.items[key] = CacheItem{
 		Value:      value,
 		Expiration: time.Now().Add(duration).UnixNano(),
 	}
+	c.mu.Unlock()
 }
 
+// Get Получить элемент из кэша
 func (c *MemoryCache) Get(key string) (interface{}, bool) {
 	c.mu.RLock()
-	defer c.mu.RUnlock()
-
 	item, found := c.items[key]
+	c.mu.RUnlock()
 	if !found {
 		return nil, false
 	}
@@ -49,20 +49,19 @@ func (c *MemoryCache) Get(key string) (interface{}, bool) {
 	return item.Value, true
 }
 
+// Delete Удаление элемента из кэша
 func (c *MemoryCache) Delete(key string) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	delete(c.items, key)
+	c.mu.Unlock()
 }
 
+// cleanupExpiredItems Очистка кэша со временем
 func (c *MemoryCache) cleanupExpiredItems() {
 	ticker := time.NewTicker(1 * time.Minute)
-	defer ticker.Stop()
-
 	for range ticker.C {
-		c.mu.Lock()
 		now := time.Now().UnixNano()
+		c.mu.Lock()
 		for key, item := range c.items {
 			if item.Expiration > 0 && now > item.Expiration {
 				delete(c.items, key)
@@ -70,4 +69,5 @@ func (c *MemoryCache) cleanupExpiredItems() {
 		}
 		c.mu.Unlock()
 	}
+	ticker.Stop()
 }

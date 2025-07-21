@@ -51,16 +51,17 @@ func (r *DocumentRepository) GetUserDocuments(ctx context.Context, userID string
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
 	var docs []*model.Document
 	for rows.Next() {
 		doc := &model.Document{}
 		if err := rows.Scan(&doc.ID, &doc.Name, &doc.Mime, &doc.File, &doc.Public, &doc.Created); err != nil {
+			rows.Close()
 			return nil, err
 		}
 		docs = append(docs, doc)
 	}
+	rows.Close()
 	return docs, nil
 }
 

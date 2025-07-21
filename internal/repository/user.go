@@ -75,16 +75,17 @@ func (r *UserRepository) ListUsers(ctx context.Context, limit, offset int) ([]*m
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
 	var users []*model.User
 	for rows.Next() {
 		user := &model.User{}
 		if err := rows.Scan(&user.ID, &user.Login); err != nil {
+			rows.Close()
 			return nil, err
 		}
 		users = append(users, user)
 	}
+	rows.Close()
 	return users, nil
 }
 

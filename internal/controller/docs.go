@@ -19,6 +19,8 @@ func NewDocsController(docService *service.DocumentService, userService *service
 		userService: userService,
 	}
 }
+
+// UploadDocument Метод загрузки документа
 func (c *DocsController) UploadDocument(ctx *fiber.Ctx) error {
 	// Получение токена из заголовков
 	token := ctx.Get("Authorization")
@@ -75,6 +77,7 @@ func (c *DocsController) UploadDocument(ctx *fiber.Ctx) error {
 	})
 }
 
+// GetDocumentsList Получить список документов
 func (c *DocsController) GetDocumentsList(ctx *fiber.Ctx) error {
 	token := ctx.Get("Authorization")
 	if token == "" {
@@ -99,6 +102,7 @@ func (c *DocsController) GetDocumentsList(ctx *fiber.Ctx) error {
 	})
 }
 
+// GetDocument Получить документ
 func (c *DocsController) GetDocument(ctx *fiber.Ctx) error {
 	token := ctx.Get("Authorization")
 	if token == "" {
@@ -126,6 +130,7 @@ func (c *DocsController) GetDocument(ctx *fiber.Ctx) error {
 	})
 }
 
+// DeleteDocument Удалить документ
 func (c *DocsController) DeleteDocument(ctx *fiber.Ctx) error {
 	token := ctx.Get("Authorization")
 	if token == "" {
