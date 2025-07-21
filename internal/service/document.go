@@ -96,16 +96,19 @@ func (s *DocumentService) UploadDocument(token string, meta string, files []*mod
 			metaData.Mime = "application/json"
 		}
 	}
-
+	uuid, err := generateID()
+	if err != nil {
+		return nil, err
+	}
 	// 4. Создание документа
 	doc := &model.Document{
-		ID:       uuid.New().String(),
+		ID:       uuid.String(),
 		Name:     metaData.Name,
 		Mime:     metaData.Mime,
 		File:     len(files) > 0,
 		Public:   metaData.Public,
 		Created:  time.Now(),
-		Owner:    user.ID,
+		Owner:    user.ID.String(),
 		FilePath: filePath,
 		JSONData: metaData.JSON,
 		Grant:    metaData.Grant,
@@ -233,11 +236,11 @@ func (s *DocumentService) DeleteDocument(token, id string) (bool, error) {
 	return true, nil
 }
 
-func generateID() (string, error) {
-	// Добавить реализацию генерации UUID
-	uuid, err := uuid.NewV7()
+// generateID создает новый UUID версии 7
+func generateID() (uuid.UUID, error) {
+	id, err := uuid.NewV7()
 	if err != nil {
-		return "", err
+		return uuid.Nil, fmt.Errorf("failed to generate UUID: %w", err)
 	}
-	return uuid.String(), nil
+	return id, nil
 }

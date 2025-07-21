@@ -8,6 +8,7 @@ import (
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/google/uuid"
 )
 
 type UserRepository struct {
@@ -24,6 +25,10 @@ func NewUserRepository(dsn string) *UserRepository {
 		panic(err)
 	}
 
+	// Устанавливаем настройки пула соединений
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(25)
+	db.SetConnMaxLifetime(5 * time.Minute)
 	return &UserRepository{db: db}
 }
 
@@ -89,10 +94,15 @@ func (r *UserRepository) ListUsers(ctx context.Context, limit, offset int) ([]*m
 	return users, nil
 }
 
-func (r *UserRepository) CreateUser(ctx context.Context, login, hashedPassword string) error {
-	_, err := r.db.ExecContext(ctx,
-		"INSERT INTO users (login, password) VALUES (?, ?)",
-		login, hashedPassword)
+func (r *UserRepository) CreateUser(ctx context.Context, uuid uuid.UUID, login, hashedPassword string) error {
+	// Конвертируем UUID в бинарный формат (16 байт)
+	uuidBinary, err := uuid.MarshalBinary()
+	if err != nil {
+		return err
+	}
+	_, err = r.db.ExecContext(ctx,
+		"INSERT INTO users (id, login, password) VALUES (?, ?, ?)",
+		uuidBinary, login, hashedPassword)
 	return err
 }
 
@@ -111,7 +121,7 @@ func (r *UserRepository) GetUserByToken(ctx context.Context, token string) (*mod
 	return user, nil
 }
 
-func (r *UserRepository) UpdateUserToken(ctx context.Context, userID, token string, expiry time.Time) error {
+func (r *UserRepository) UpdateUserToken(ctx context.Context, userID uuid.UUID, token string, expiry time.Time) error {
 	_, err := r.db.ExecContext(ctx,
 		"UPDATE users SET token = ?, token_expiry = ? WHERE id = ?",
 		token, expiry, userID)
