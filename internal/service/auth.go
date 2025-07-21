@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 	"errors"
+	"regexp"
 	"time"
+	"unicode"
 
 	"golang.org/x/crypto/bcrypt"
 
@@ -112,12 +114,62 @@ func (s *AuthService) Logout(token string) error {
 }
 
 func validateLogin(login string) error {
-	// Добавить валидацию логина
+	// Проверка минимальной длины
+	if len(login) < 8 {
+		return errors.New("login must be at least 8 characters long")
+	}
+
+	// Проверка на латиницу и цифры
+	matched, err := regexp.MatchString(`^[a-zA-Z0-9]+$`, login)
+	if err != nil {
+		return err
+	}
+	if !matched {
+		return errors.New("login must contain only latin letters and digits")
+	}
+
 	return nil
 }
 
 func validatePassword(password string) error {
-	// Добавить валидацию пароля
+	// Проверка минимальной длины
+	if len(password) < 8 {
+		return errors.New("password must be at least 8 characters long")
+	}
+
+	var (
+		hasUpper   bool
+		hasLower   bool
+		hasDigit   bool
+		hasSpecial bool
+	)
+
+	for _, char := range password {
+		switch {
+		case unicode.IsUpper(char):
+			hasUpper = true
+		case unicode.IsLower(char):
+			hasLower = true
+		case unicode.IsDigit(char):
+			hasDigit = true
+		case !unicode.IsLetter(char) && !unicode.IsDigit(char):
+			hasSpecial = true
+		}
+	}
+
+	// Проверка требований
+	if !hasUpper || !hasLower {
+		return errors.New("password must contain at least 2 letters in different cases (upper and lower)")
+	}
+
+	if !hasDigit {
+		return errors.New("password must contain at least 1 digit")
+	}
+
+	if !hasSpecial {
+		return errors.New("password must contain at least 1 special character")
+	}
+
 	return nil
 }
 

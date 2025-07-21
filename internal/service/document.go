@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type DocumentService struct {
@@ -59,10 +61,14 @@ func (s *DocumentService) UploadDocument(token string, meta string, files []*mod
 			return nil, err
 		}
 	}
-
+	// генерим uuid
+	uuid, err := generateID()
+	if err != nil {
+		return nil, err
+	}
 	// 4. Создание документа
 	doc := &model.Document{
-		ID:       generateID(),
+		ID:       uuid,
 		Name:     "example",                  // Добавить из meta
 		Mime:     "application/octet-stream", // Добавить из meta или файла
 		File:     len(files) > 0,
@@ -191,7 +197,11 @@ func (s *DocumentService) DeleteDocument(token, id string) (bool, error) {
 	return true, nil
 }
 
-func generateID() string {
+func generateID() (string, error) {
 	// Добавить реализацию генерации UUID
-	return "generated-id"
+	uuid, err := uuid.NewV7()
+	if err != nil {
+		return "", err
+	}
+	return uuid.String(), nil
 }
