@@ -3,6 +3,7 @@ package controller
 import (
 	"docs-server/internal/model"
 	"docs-server/internal/service"
+	"errors"
 
 	"github.com/gofiber/fiber/v2"
 )
@@ -20,7 +21,7 @@ func (c *AuthController) GetAuthService() *service.AuthService {
 	return c.authService
 }
 
-// Register установить маршруты для авторизации
+// Register устанавливает маршруты для регистрации
 func (c *AuthController) Register(ctx *fiber.Ctx) error {
 	type RegisterRequest struct {
 		Token string `json:"token"`
@@ -33,8 +34,13 @@ func (c *AuthController) Register(ctx *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
-	if err := c.authService.Register(req.Token, req.Login, req.Pswd); err != nil {
-		return err
+	err := c.authService.Register(req.Token, req.Login, req.Pswd)
+	if err != nil {
+		// Проверяем, является ли ошибка ошибкой неверного токена
+		if errors.Is(err, service.ErrInvalidAdminToken) {
+			return fiber.NewError(fiber.StatusUnauthorized, "Invalid admin token")
+		}
+		return err // Возвращаем другие ошибки как есть
 	}
 
 	return ctx.JSON(model.Response{

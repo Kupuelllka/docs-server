@@ -52,7 +52,7 @@ func (r *UserRepository) GetUserByLogin(ctx context.Context, login string) (*mod
 
 	var (
 		token       sql.NullString
-		tokenExpiry sql.NullTime
+		tokenExpiry sql.NullString // Изменено на NullString
 		password    sql.NullString
 	)
 
@@ -67,15 +67,21 @@ func (r *UserRepository) GetUserByLogin(ctx context.Context, login string) (*mod
 		return nil, fmt.Errorf("failed to get user by login: %w", err)
 	}
 
-	// Устанавливаем поля только если они не NULL
+	// Устанавливаем поля
 	if password.Valid {
 		user.Password = password.String
 	}
 	if token.Valid {
 		user.Token = token.String
 	}
-	if tokenExpiry.Valid {
-		user.TokenExpiry = tokenExpiry.Time
+
+	// Парсим дату, если она есть
+	if tokenExpiry.Valid && tokenExpiry.String != "" {
+		parsedTime, err := time.Parse("2006-01-02 15:04:05", tokenExpiry.String)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse token expiry: %w", err)
+		}
+		user.TokenExpiry = parsedTime
 	} else {
 		user.TokenExpiry = time.Time{}
 	}
@@ -137,16 +143,43 @@ func (r *UserRepository) CreateUser(ctx context.Context, uuid uuid.UUID, login, 
 
 func (r *UserRepository) GetUserByToken(ctx context.Context, token string) (*model.User, error) {
 	user := &model.User{}
+
+	var idBytes []byte
+	var tokenExpiryStr sql.NullString
+
 	err := r.db.QueryRowContext(ctx,
 		"SELECT id, login, password, token_expiry FROM users WHERE token = ?", token).
-		Scan(&user.ID, &user.Login, &user.Password, &user.TokenExpiry)
+		Scan(&idBytes, &user.Login, &user.Password, &tokenExpiryStr)
 
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get user by token: %w", err)
 	}
+
+	// Конвертируем binary(16) в UUID строку
+	if len(idBytes) == 16 {
+		uuid, err := uuid.FromBytes(idBytes)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse UUID: %w", err)
+		}
+		user.ID = uuid
+	} else {
+		return nil, fmt.Errorf("invalid binary UUID length: %d", len(idBytes))
+	}
+
+	if tokenExpiryStr.Valid && tokenExpiryStr.String != "" {
+		// Формат зависит от вашей БД, обычно "2006-01-02 15:04:05"
+		parsedTime, err := time.Parse("2006-01-02 15:04:05", tokenExpiryStr.String)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse token expiry: %w", err)
+		}
+		user.TokenExpiry = parsedTime
+	} else {
+		user.TokenExpiry = time.Time{}
+	}
+
 	return user, nil
 }
 

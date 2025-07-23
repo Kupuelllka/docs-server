@@ -3,6 +3,7 @@ package documents_test
 import (
 	"docs-server/cmd/tests/testutils"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,12 +16,21 @@ func TestGetDocumentsList_Success(t *testing.T) {
 	app := testutils.TestApp
 	token := testutils.TestToken
 
+	t.Logf("Using test token: %s", token) // Добавьте это для отладки
+
 	req := httptest.NewRequest("GET", "/api/docs", nil)
 	req.Header.Set("Authorization", token)
 
 	resp, err := app.Test(req)
-	assert.NoError(t, err)
+	if err != nil {
+		t.Fatalf("Request error: %v", err)
+	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("Expected 200, got %d. Body: %s", resp.StatusCode, string(body))
+	}
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 

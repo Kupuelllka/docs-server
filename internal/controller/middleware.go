@@ -15,7 +15,7 @@ func AuthMiddleware(authService service.AuthService) fiber.Handler {
 
 		user, err := authService.ValidateToken(token)
 		if err != nil {
-			return fiber.NewError(fiber.StatusUnauthorized, "Invalid token")
+			return fiber.NewError(fiber.StatusUnauthorized, err.Error())
 		}
 
 		// Сохраняем пользователя в контексте

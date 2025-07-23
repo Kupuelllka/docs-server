@@ -33,7 +33,7 @@ func (s *AuthService) Register(adminToken, login, password string) error {
 		return err
 	}
 	if adminToken != s.adminToken {
-		return errors.New("invalid admin token")
+		return ErrInvalidAdminToken
 	}
 
 	if err := validateLogin(login); err != nil {
