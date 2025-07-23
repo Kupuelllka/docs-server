@@ -36,7 +36,7 @@ func (r *DocumentRepository) CreateDocument(ctx context.Context, doc *model.Docu
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO documents 
 		(id, name, mime, is_file, is_public, created_at, owner_id, file_path, json_data) 
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (UUID_TO_BIN(?), ?, ?, ?, ?, ?, UUID_TO_BIN(?), ?, ?)`,
 		doc.ID, doc.Name, doc.Mime, doc.File, doc.Public,
 		doc.Created, doc.Owner, doc.FilePath, doc.JSONData)
 	return err
@@ -44,27 +44,33 @@ func (r *DocumentRepository) CreateDocument(ctx context.Context, doc *model.Docu
 
 func (r *DocumentRepository) GetDocumentByID(ctx context.Context, id string) (*model.Document, error) {
 	doc := &model.Document{}
+	var idStr, ownerStr string
+
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, name, mime, is_file, is_public, created_at, file_path, json_data, owner_id
-		FROM documents WHERE id = ?`, id).
-		Scan(&doc.ID, &doc.Name, &doc.Mime, &doc.File, &doc.Public,
-			&doc.Created, &doc.FilePath, &doc.JSONData, &doc.Owner)
+		SELECT 
+			UUID_TO_STRING(id), name, mime, is_file, is_public, 
+			created_at, file_path, json_data, UUID_TO_STRING(owner_id)
+		FROM documents WHERE id = UUID_TO_BIN(?)`, id).
+		Scan(&idStr, &doc.Name, &doc.Mime, &doc.File, &doc.Public,
+			&doc.Created, &doc.FilePath, &doc.JSONData, &ownerStr)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil // Документ не найден - не ошибка
 		}
 		return nil, err
 	}
+
 	return doc, nil
 }
 
-func (r *DocumentRepository) GetUserDocuments(ctx context.Context, userID string, limit int) ([]*model.Document, error) {
+func (r *DocumentRepository) GetUserDocuments(ctx context.Context, userid string, limit int) ([]*model.Document, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, name, mime, is_file, is_public, created_at
+		SELECT 
+			UUID_TO_STRING(id), name, mime, is_file, is_public, created_at
 		FROM documents 
-		WHERE owner_id = ?
+		WHERE owner_id = UUID_TO_BIN(?)
 		ORDER BY name, created_at
-		LIMIT ?`, userID, limit)
+		LIMIT ?`, userid, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +93,7 @@ func (r *DocumentRepository) GetUserDocuments(ctx context.Context, userID string
 }
 
 func (r *DocumentRepository) DeleteDocument(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx, "DELETE FROM documents WHERE id = ?", id)
+	_, err := r.db.ExecContext(ctx, "DELETE FROM documents WHERE id = UUID_TO_BIN(?)", id)
 	return err
 }
 

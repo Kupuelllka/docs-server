@@ -5,8 +5,6 @@ import (
 	"docs-server/internal/model"
 	"docs-server/internal/repository"
 	"errors"
-
-	"github.com/google/uuid"
 )
 
 type UserService struct {
@@ -20,8 +18,8 @@ func NewUserService(userRepo *repository.UserRepository) *UserService {
 }
 
 // GetUserByID возвращает пользователя по ID
-func (s *UserService) GetUserByID(ctx context.Context, id uuid.UUID) (*model.User, error) {
-	if id.String() == "" {
+func (s *UserService) GetUserByID(ctx context.Context, id string) (*model.User, error) {
+	if id == "" {
 		return nil, errors.New("user ID cannot be empty")
 	}
 
@@ -58,7 +56,7 @@ func (s *UserService) UpdateUser(ctx context.Context, user *model.User) error {
 	if user == nil {
 		return errors.New("user cannot be nil")
 	}
-	if user.ID.String() == "" {
+	if user.ID == "" {
 		return errors.New("user ID cannot be empty")
 	}
 
@@ -78,8 +76,8 @@ func (s *UserService) UpdateUser(ctx context.Context, user *model.User) error {
 }
 
 // DeleteUser удаляет пользователя по ID
-func (s *UserService) DeleteUser(ctx context.Context, id uuid.UUID) error {
-	if id.String() == "" {
+func (s *UserService) DeleteUser(ctx context.Context, id string) error {
+	if id == "" {
 		return errors.New("user ID cannot be empty")
 	}
 

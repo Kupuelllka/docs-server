@@ -96,19 +96,19 @@ func (s *DocumentService) UploadDocument(token string, meta string, files []*mod
 			metaData.Mime = "application/json"
 		}
 	}
-	uuid, err := generateID()
+	docID, err := generateID()
 	if err != nil {
 		return nil, err
 	}
 	// 4. Создание документа
 	doc := &model.Document{
-		ID:       uuid.String(),
+		ID:       docID,
 		Name:     metaData.Name,
 		Mime:     metaData.Mime,
 		File:     len(files) > 0,
 		Public:   metaData.Public,
 		Created:  time.Now(),
-		Owner:    user.ID.String(),
+		Owner:    user.ID,
 		FilePath: filePath,
 		JSONData: metaData.JSON,
 		Grant:    metaData.Grant,
@@ -124,7 +124,7 @@ func (s *DocumentService) UploadDocument(token string, meta string, files []*mod
 	}
 
 	// 6. Инвалидация кеша
-	s.cache.Delete("docs_" + user.ID.String())
+	s.cache.Delete("docs_" + user.ID)
 
 	return doc, nil
 }
@@ -140,7 +140,7 @@ func (s *DocumentService) GetDocumentsList(token, login, key, value string, limi
 	}
 
 	// 2. Проверка кеша
-	cacheKey := "docs_" + user.ID.String()
+	cacheKey := "docs_" + user.ID
 	if cached, found := s.cache.Get(cacheKey); found {
 		return cached.([]*model.Document), nil
 	}
@@ -149,7 +149,7 @@ func (s *DocumentService) GetDocumentsList(token, login, key, value string, limi
 	var docs []*model.Document
 	if login == "" || login == user.Login {
 		// Документы пользователя
-		docs, err = s.docRepo.GetUserDocuments(context.Background(), user.ID.String(), limit)
+		docs, err = s.docRepo.GetUserDocuments(context.Background(), user.ID, limit)
 	} else {
 		// Добавить обработку документов другого пользователя (с проверкой прав доступа)
 		// (дополнительная реализация)
@@ -188,7 +188,7 @@ func (s *DocumentService) GetDocument(token, id string) (*model.Document, error)
 	}
 
 	// 4. Проверка прав доступа
-	if doc.Owner != user.ID.String() && !doc.Public {
+	if doc.Owner != user.ID && !doc.Public {
 		return nil, errors.New("forbidden")
 	}
 
@@ -213,7 +213,7 @@ func (s *DocumentService) DeleteDocument(token, id string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if doc.Owner != user.ID.String() {
+	if doc.Owner != user.ID {
 		return false, errors.New("forbidden")
 	}
 
@@ -231,16 +231,16 @@ func (s *DocumentService) DeleteDocument(token, id string) (bool, error) {
 
 	// 5. Инвалидация кеша
 	s.cache.Delete("doc_" + id)
-	s.cache.Delete("docs_" + user.ID.String())
+	s.cache.Delete("docs_" + user.ID)
 
 	return true, nil
 }
 
 // generateID создает новый UUID версии 7
-func generateID() (uuid.UUID, error) {
+func generateID() (string, error) {
 	id, err := uuid.NewV7()
 	if err != nil {
-		return uuid.Nil, fmt.Errorf("failed to generate UUID: %w", err)
+		return "", fmt.Errorf("failed to generate UUID: %w", err)
 	}
-	return id, nil
+	return id.String(), nil
 }

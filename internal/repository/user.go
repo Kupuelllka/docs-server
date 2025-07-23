@@ -9,7 +9,6 @@ import (
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
-	"github.com/google/uuid"
 )
 
 type UserRepository struct {
@@ -33,10 +32,10 @@ func NewUserRepository(dsn string) *UserRepository {
 	return &UserRepository{db: db}
 }
 
-func (r *UserRepository) GetUserByID(ctx context.Context, id uuid.UUID) (*model.User, error) {
+func (r *UserRepository) GetUserByID(ctx context.Context, id string) (*model.User, error) {
 	user := &model.User{}
 	err := r.db.QueryRowContext(ctx,
-		"SELECT id, login, password, token, token_expiry FROM users WHERE id = ?", id).
+		"SELECT UUID_TO_STRING(id), login, password, token, token_expiry FROM users WHERE id = UUID_TO_BIN(?)", id).
 		Scan(&user.ID, &user.Login, &user.Password, &user.Token, &user.TokenExpiry)
 
 	if errors.Is(err, sql.ErrNoRows) {
@@ -89,23 +88,14 @@ func (r *UserRepository) GetUserByLogin(ctx context.Context, login string) (*mod
 	return user, nil
 }
 func (r *UserRepository) UpdateUser(ctx context.Context, user *model.User) error {
-	uuidBinary, err := user.ID.MarshalBinary()
-	if err != nil {
-		return err
-	}
-	_, err = r.db.ExecContext(ctx,
-		"UPDATE users SET login = ? WHERE id = ?",
-		user.Login, uuidBinary)
+	_, err := r.db.ExecContext(ctx,
+		"UPDATE users SET login = ? WHERE id = UUID_TO_BIN(?)",
+		user.Login, user.ID)
 	return err
 }
 
-func (r *UserRepository) DeleteUser(ctx context.Context, id uuid.UUID) error {
-	// Конвертируем UUID в бинарный формат (16 байт)
-	uuidBinary, err := id.MarshalBinary()
-	if err != nil {
-		return err
-	}
-	_, err = r.db.ExecContext(ctx, "DELETE FROM users WHERE id = ?", uuidBinary)
+func (r *UserRepository) DeleteUser(ctx context.Context, id string) error {
+	_, err := r.db.ExecContext(ctx, "DELETE FROM users WHERE id = UUID_TO_BIN(?)", id)
 	return err
 }
 
@@ -129,44 +119,26 @@ func (r *UserRepository) ListUsers(ctx context.Context, limit, offset int) ([]*m
 	return users, nil
 }
 
-func (r *UserRepository) CreateUser(ctx context.Context, uuid uuid.UUID, login, hashedPassword string) error {
-	// Конвертируем UUID в бинарный формат (16 байт)
-	uuidBinary, err := uuid.MarshalBinary()
-	if err != nil {
-		return err
-	}
-	_, err = r.db.ExecContext(ctx,
-		"INSERT INTO users (id, login, password) VALUES (?, ?, ?)",
-		uuidBinary, login, hashedPassword)
+func (r *UserRepository) CreateUser(ctx context.Context, id string, login, hashedPassword string) error {
+	_, err := r.db.ExecContext(ctx,
+		"INSERT INTO users (id, login, password) VALUES (UUID_TO_BIN(?), ?, ?)",
+		id, login, hashedPassword)
 	return err
 }
 
 func (r *UserRepository) GetUserByToken(ctx context.Context, token string) (*model.User, error) {
 	user := &model.User{}
-
-	var idBytes []byte
 	var tokenExpiryStr sql.NullString
 
 	err := r.db.QueryRowContext(ctx,
-		"SELECT id, login, password, token_expiry FROM users WHERE token = ?", token).
-		Scan(&idBytes, &user.Login, &user.Password, &tokenExpiryStr)
+		"SELECT UUID_TO_STRING(id), login, password, token_expiry FROM users WHERE token = ?", token).
+		Scan(&user.ID, &user.Login, &user.Password, &tokenExpiryStr)
 
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user by token: %w", err)
-	}
-
-	// Конвертируем binary(16) в UUID строку
-	if len(idBytes) == 16 {
-		uuid, err := uuid.FromBytes(idBytes)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse UUID: %w", err)
-		}
-		user.ID = uuid
-	} else {
-		return nil, fmt.Errorf("invalid binary UUID length: %d", len(idBytes))
 	}
 
 	if tokenExpiryStr.Valid && tokenExpiryStr.String != "" {
@@ -183,14 +155,10 @@ func (r *UserRepository) GetUserByToken(ctx context.Context, token string) (*mod
 	return user, nil
 }
 
-func (r *UserRepository) UpdateUserToken(ctx context.Context, userID uuid.UUID, token string, expiry time.Time) error {
-	uuidBinary, err := userID.MarshalBinary()
-	if err != nil {
-		return err
-	}
-	_, err = r.db.ExecContext(ctx,
+func (r *UserRepository) UpdateUserToken(ctx context.Context, userID string, token string, expiry time.Time) error {
+	_, err := r.db.ExecContext(ctx,
 		"UPDATE users SET token = ?, token_expiry = ? WHERE id = ?",
-		token, expiry, uuidBinary)
+		token, expiry, userID)
 	return err
 }
 
