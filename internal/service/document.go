@@ -124,7 +124,7 @@ func (s *DocumentService) UploadDocument(token string, meta string, files []*mod
 	}
 
 	// 6. Инвалидация кеша
-	s.cache.Delete("docs_" + user.ID)
+	s.cache.Delete("docs_" + user.ID.String())
 
 	return doc, nil
 }
@@ -140,7 +140,7 @@ func (s *DocumentService) GetDocumentsList(token, login, key, value string, limi
 	}
 
 	// 2. Проверка кеша
-	cacheKey := "docs_" + user.ID
+	cacheKey := "docs_" + user.ID.String()
 	if cached, found := s.cache.Get(cacheKey); found {
 		return cached.([]*model.Document), nil
 	}
@@ -149,7 +149,7 @@ func (s *DocumentService) GetDocumentsList(token, login, key, value string, limi
 	var docs []*model.Document
 	if login == "" || login == user.Login {
 		// Документы пользователя
-		docs, err = s.docRepo.GetUserDocuments(context.Background(), user.ID, limit)
+		docs, err = s.docRepo.GetUserDocuments(context.Background(), user.ID.String(), limit)
 	} else {
 		// Добавить обработку документов другого пользователя (с проверкой прав доступа)
 		// (дополнительная реализация)
@@ -188,7 +188,7 @@ func (s *DocumentService) GetDocument(token, id string) (*model.Document, error)
 	}
 
 	// 4. Проверка прав доступа
-	if doc.Owner != user.ID && !doc.Public {
+	if doc.Owner != user.ID.String() && !doc.Public {
 		return nil, errors.New("forbidden")
 	}
 
@@ -213,7 +213,7 @@ func (s *DocumentService) DeleteDocument(token, id string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if doc.Owner != user.ID {
+	if doc.Owner != user.ID.String() {
 		return false, errors.New("forbidden")
 	}
 
@@ -231,7 +231,7 @@ func (s *DocumentService) DeleteDocument(token, id string) (bool, error) {
 
 	// 5. Инвалидация кеша
 	s.cache.Delete("doc_" + id)
-	s.cache.Delete("docs_" + user.ID)
+	s.cache.Delete("docs_" + user.ID.String())
 
 	return true, nil
 }

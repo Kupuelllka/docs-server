@@ -32,7 +32,7 @@ func NewUserRepository(dsn string) *UserRepository {
 	return &UserRepository{db: db}
 }
 
-func (r *UserRepository) GetUserByID(ctx context.Context, id string) (*model.User, error) {
+func (r *UserRepository) GetUserByID(ctx context.Context, id uuid.UUID) (*model.User, error) {
 	user := &model.User{}
 	err := r.db.QueryRowContext(ctx,
 		"SELECT id, login, password, token, token_expiry FROM users WHERE id = ?", id).
@@ -69,12 +69,18 @@ func (r *UserRepository) UpdateUser(ctx context.Context, user *model.User) error
 	return err
 }
 
-func (r *UserRepository) DeleteUser(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx, "DELETE FROM users WHERE id = ?", id)
+func (r *UserRepository) DeleteUser(ctx context.Context, id uuid.UUID) error {
+	// Конвертируем UUID в бинарный формат (16 байт)
+	uuidBinary, err := id.MarshalBinary()
+	if err != nil {
+		return err
+	}
+	_, err = r.db.ExecContext(ctx, "DELETE FROM users WHERE id = ?", uuidBinary)
 	return err
 }
 
 func (r *UserRepository) ListUsers(ctx context.Context, limit, offset int) ([]*model.User, error) {
+
 	rows, err := r.db.QueryContext(ctx,
 		"SELECT id, login FROM users LIMIT ? OFFSET ?", limit, offset)
 	if err != nil {
