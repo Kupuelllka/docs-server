@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"docs-server/internal/model"
 	"errors"
+	"fmt"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -46,26 +47,49 @@ func (r *UserRepository) GetUserByID(ctx context.Context, id uuid.UUID) (*model.
 	}
 	return user, nil
 }
-
 func (r *UserRepository) GetUserByLogin(ctx context.Context, login string) (*model.User, error) {
 	user := &model.User{}
+
+	var (
+		token       sql.NullString
+		tokenExpiry sql.NullTime
+		password    sql.NullString
+	)
+
 	err := r.db.QueryRowContext(ctx,
 		"SELECT id, login, password, token, token_expiry FROM users WHERE login = ?", login).
-		Scan(&user.ID, &user.Login, &user.Password, &user.Token, &user.TokenExpiry)
+		Scan(&user.ID, &user.Login, &password, &token, &tokenExpiry)
 
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get user by login: %w", err)
 	}
+
+	// Устанавливаем поля только если они не NULL
+	if password.Valid {
+		user.Password = password.String
+	}
+	if token.Valid {
+		user.Token = token.String
+	}
+	if tokenExpiry.Valid {
+		user.TokenExpiry = tokenExpiry.Time
+	} else {
+		user.TokenExpiry = time.Time{}
+	}
+
 	return user, nil
 }
-
 func (r *UserRepository) UpdateUser(ctx context.Context, user *model.User) error {
-	_, err := r.db.ExecContext(ctx,
+	uuidBinary, err := user.ID.MarshalBinary()
+	if err != nil {
+		return err
+	}
+	_, err = r.db.ExecContext(ctx,
 		"UPDATE users SET login = ? WHERE id = ?",
-		user.Login, user.ID)
+		user.Login, uuidBinary)
 	return err
 }
 
@@ -80,7 +104,6 @@ func (r *UserRepository) DeleteUser(ctx context.Context, id uuid.UUID) error {
 }
 
 func (r *UserRepository) ListUsers(ctx context.Context, limit, offset int) ([]*model.User, error) {
-
 	rows, err := r.db.QueryContext(ctx,
 		"SELECT id, login FROM users LIMIT ? OFFSET ?", limit, offset)
 	if err != nil {
@@ -128,9 +151,13 @@ func (r *UserRepository) GetUserByToken(ctx context.Context, token string) (*mod
 }
 
 func (r *UserRepository) UpdateUserToken(ctx context.Context, userID uuid.UUID, token string, expiry time.Time) error {
-	_, err := r.db.ExecContext(ctx,
+	uuidBinary, err := userID.MarshalBinary()
+	if err != nil {
+		return err
+	}
+	_, err = r.db.ExecContext(ctx,
 		"UPDATE users SET token = ?, token_expiry = ? WHERE id = ?",
-		token, expiry, userID)
+		token, expiry, uuidBinary)
 	return err
 }
 

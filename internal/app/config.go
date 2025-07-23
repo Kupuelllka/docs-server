@@ -9,6 +9,7 @@ import (
 
 type Config struct {
 	Server struct {
+		Host string `yaml:"host"`
 		Port string `yaml:"port"`
 	} `yaml:"server"`
 	Database struct {
@@ -27,8 +28,9 @@ func NewConfig() (*Config, error) {
 	// Значения по умолчанию
 	config := &Config{
 		Server: struct {
+			Host string `yaml:"host"`
 			Port string `yaml:"port"`
-		}{Port: "8080"},
+		}{Host: "127.0.0.1", Port: "8080"},
 		Database: struct {
 			DSN string `yaml:"dsn"`
 		}{DSN: "root:password@tcp(localhost:3306)/documents_db"},
@@ -42,7 +44,7 @@ func NewConfig() (*Config, error) {
 
 	// Пути к возможным расположениям конфигурационных файлов
 	configPaths := []string{
-		"prod.yml",                            // В текущей директории
+		"../../docs-server/prod.yaml",         // В текущей директории
 		"/etc/docs-server/config.yml",         // Общий системный конфиг
 		filepath.Join("config", "config.yml"), // В папке config
 	}
