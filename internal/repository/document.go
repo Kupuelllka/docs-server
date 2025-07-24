@@ -63,23 +63,36 @@ func (r *DocumentRepository) CreateDocument(ctx context.Context, doc *model.Docu
 
 	// Добавляем разрешения, если они есть
 	if len(doc.Grant) > 0 {
-		stmt, err := tx.PrepareContext(ctx, `
+		// Получаем список ID пользователей
+		stmtSelect, err := tx.PrepareContext(ctx, `
+            SELECT UUID_TO_STRING(id) FROM users WHERE login = ?`)
+		if err != nil {
+			return fmt.Errorf("failed to prepare select user statement: %v", err)
+		}
+		defer stmtSelect.Close()
+
+		stmtInsert, err := tx.PrepareContext(ctx, `
             INSERT INTO document_grants 
             (document_id, user_id) 
             VALUES (UUID_TO_BIN(?), UUID_TO_BIN(?))`)
 		if err != nil {
 			return fmt.Errorf("failed to prepare grants statement: %v", err)
 		}
-		defer stmt.Close()
+		defer stmtInsert.Close()
 
-		for _, userID := range doc.Grant {
-			_, err = stmt.ExecContext(ctx, doc.ID, userID)
+		for _, username := range doc.Grant {
+			var userID string
+			err = stmtSelect.QueryRowContext(ctx, username).Scan(&userID)
 			if err != nil {
-				return fmt.Errorf("failed to insert grant for user %s: %v", userID, err)
+				return fmt.Errorf("failed to find user with username %s: %v", username, err)
+			}
+
+			_, err = stmtInsert.ExecContext(ctx, doc.ID, userID)
+			if err != nil {
+				return fmt.Errorf("failed to insert grant for user %s: %v", username, err)
 			}
 		}
 	}
-
 	// Пишем транзакцию
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %v", err)
@@ -87,11 +100,11 @@ func (r *DocumentRepository) CreateDocument(ctx context.Context, doc *model.Docu
 
 	return nil
 }
-
 func (r *DocumentRepository) GetDocumentByID(ctx context.Context, id string) (*model.Document, error) {
 	doc := &model.Document{}
 	var createdAtBytes []byte
 
+	// Получаем основные данные документа
 	err := r.db.QueryRowContext(ctx, `
         SELECT 
             UUID_TO_STRING(id), name, mime, is_file, is_public, 
@@ -106,12 +119,37 @@ func (r *DocumentRepository) GetDocumentByID(ctx context.Context, id string) (*m
 		return nil, err
 	}
 
+	// Парсим дату создания
 	createdAtStr := string(createdAtBytes)
 	createdAt, err := time.Parse("2006-01-02 15:04:05", createdAtStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse created_at: %v", err)
 	}
 	doc.Created = createdAt
+
+	// Получаем список прав доступа из document_grants
+	rows, err := r.db.QueryContext(ctx, `
+        SELECT UUID_TO_STRING(user_id) 
+        FROM document_grants 
+        WHERE document_id = UUID_TO_BIN(?)`, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query grants: %v", err)
+	}
+	defer rows.Close()
+
+	var grants []string
+	for rows.Next() {
+		var userID string
+		if err := rows.Scan(&userID); err != nil {
+			return nil, fmt.Errorf("failed to scan grant user_id: %v", err)
+		}
+		grants = append(grants, userID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating grants: %v", err)
+	}
+
+	doc.Grant = grants
 
 	return doc, nil
 }
