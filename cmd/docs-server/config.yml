@@ -1,0 +1,10 @@
+server:
+  host: "127.0.0.1"
+  port: "8008"
+database:
+  dsn: "doc_service:test@tcp(localhost:3306)/test"
+auth:
+  admin_token: "secure"
+  jwt_secret: "c2VjcmV0LXNlY3JldC1zZWNyZXDSDSDQtc2VjcmV0LXNlY3Jld"
+storage:
+  upload_dir: "uploads"
