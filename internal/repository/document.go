@@ -35,8 +35,14 @@ func NewDocumentRepository(dsn string) *DocumentRepository {
 }
 
 func (r *DocumentRepository) CreateDocument(ctx context.Context, doc *model.Document) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %v", err)
+	}
+	defer tx.Rollback()
+
+	// Если есть jsondata записываем
 	var jsonData []byte
-	var err error
 	if doc.JSONData != nil {
 		jsonData, err = json.Marshal(doc.JSONData)
 		if err != nil {
@@ -44,13 +50,42 @@ func (r *DocumentRepository) CreateDocument(ctx context.Context, doc *model.Docu
 		}
 	}
 
-	_, err = r.db.ExecContext(ctx, `
+	// Добавляем документ
+	_, err = tx.ExecContext(ctx, `
         INSERT INTO documents 
         (id, name, mime, is_file, is_public, created_at, owner_id, file_path, json_data) 
         VALUES (UUID_TO_BIN(?), ?, ?, ?, ?, ?, UUID_TO_BIN(?), ?, ?)`,
 		doc.ID, doc.Name, doc.Mime, doc.File, doc.Public,
 		doc.Created, doc.Owner, doc.FilePath, jsonData)
-	return err
+	if err != nil {
+		return fmt.Errorf("failed to insert document: %v", err)
+	}
+
+	// Добавляем разрешения, если они есть
+	if len(doc.Grant) > 0 {
+		stmt, err := tx.PrepareContext(ctx, `
+            INSERT INTO document_grants 
+            (document_id, user_id) 
+            VALUES (UUID_TO_BIN(?), UUID_TO_BIN(?))`)
+		if err != nil {
+			return fmt.Errorf("failed to prepare grants statement: %v", err)
+		}
+		defer stmt.Close()
+
+		for _, userID := range doc.Grant {
+			_, err = stmt.ExecContext(ctx, doc.ID, userID)
+			if err != nil {
+				return fmt.Errorf("failed to insert grant for user %s: %v", userID, err)
+			}
+		}
+	}
+
+	// Пишем транзакцию
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %v", err)
+	}
+
+	return nil
 }
 
 func (r *DocumentRepository) GetDocumentByID(ctx context.Context, id string) (*model.Document, error) {
