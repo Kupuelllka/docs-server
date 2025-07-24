@@ -1,6 +1,8 @@
 package app
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"os"
 	"path/filepath"
 
@@ -17,6 +19,7 @@ type Config struct {
 	} `yaml:"database"`
 	Auth struct {
 		AdminToken string `yaml:"admin_token"`
+		JWTSecret  string `yaml:"jwt_secret"` // base64-encoded 32-byte secret
 	} `yaml:"auth"`
 	Storage struct {
 		UploadDir string `yaml:"upload_dir"`
@@ -25,51 +28,70 @@ type Config struct {
 
 // NewConfig загружает конфигурацию из файла или использует значения по умолчанию
 func NewConfig() (*Config, error) {
+	// Генерация случайного JWT секрета для дефолтной конфигурации
+	jwtSecret := generateRandomSecret()
+
 	// Значения по умолчанию
 	config := &Config{
 		Server: struct {
 			Host string `yaml:"host"`
 			Port string `yaml:"port"`
-		}{Host: "127.0.0.1", Port: "8080"},
+		}{
+			Host: "127.0.0.1",
+			Port: "8080",
+		},
 		Database: struct {
 			DSN string `yaml:"dsn"`
-		}{DSN: "root:password@tcp(localhost:3306)/documents_db"},
+		}{
+			DSN: "root:password@tcp(localhost:3306)/documents_db",
+		},
 		Auth: struct {
 			AdminToken string `yaml:"admin_token"`
-		}{AdminToken: "admin-secret-token"},
+			JWTSecret  string `yaml:"jwt_secret"`
+		}{
+			AdminToken: "admin-secret-token",
+			JWTSecret:  jwtSecret,
+		},
 		Storage: struct {
 			UploadDir string `yaml:"upload_dir"`
-		}{UploadDir: "uploads"},
+		}{
+			UploadDir: "uploads",
+		},
 	}
 
 	// Пути к возможным расположениям конфигурационных файлов
 	configPaths := []string{
-		"../../docs-server/prod.yaml",         // В текущей директории
+		"../../docs-server/prod.yml",          // В текущей директории
 		"/etc/docs-server/config.yml",         // Общий системный конфиг
 		filepath.Join("config", "config.yml"), // В папке config
 	}
 
 	// Попробуем найти и загрузить конфигурационный файл
-	var configFile *os.File
-	var err error
-
 	for _, path := range configPaths {
-		configFile, err = os.Open(path)
-		if err == nil {
+		if configFile, err := os.Open(path); err == nil {
 			defer configFile.Close()
+			if err := yaml.NewDecoder(configFile).Decode(config); err != nil {
+				return nil, err
+			}
 			break
 		}
 	}
 
-	// Если файл конфигурации найден - загружаем его
-	if configFile != nil {
-		decoder := yaml.NewDecoder(configFile)
-		if err := decoder.Decode(config); err != nil {
-			return nil, err
-		}
-	}
-
 	return config, nil
+}
+
+// generateRandomSecret генерирует случайный base64-encoded 32-byte secret
+func generateRandomSecret() string {
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		panic("failed to generate random secret: " + err.Error())
+	}
+	return base64.StdEncoding.EncodeToString(key)
+}
+
+// GetJWTSecret возвращает декодированный JWT секрет
+func (c *Config) GetJWTSecret() ([]byte, error) {
+	return base64.StdEncoding.DecodeString(c.Auth.JWTSecret)
 }
 
 // LoadConfigFromFile явно загружает конфигурацию из указанного файла

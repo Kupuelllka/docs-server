@@ -2,36 +2,63 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
+	"fmt"
 	"regexp"
 	"time"
 	"unicode"
 
+	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 
 	"docs-server/internal/model"
 	"docs-server/internal/repository"
 )
 
+var (
+	ErrInvalidAdminToken  = errors.New("invalid admin token")
+	ErrInvalidCredentials = errors.New("invalid credentials")
+	ErrTokenExpired       = errors.New("token expired")
+)
+
+// JWT секретный ключ (в продакшене должен храниться в безопасном месте)
+var jwtSecret = generateSecureKey(32) // 256-bit key
+
 type AuthService struct {
 	userRepo    *repository.UserRepository
 	adminToken  string
+	jwtSecret   []byte
 	tokenExpiry time.Duration
 }
 
-func NewAuthService(userRepo *repository.UserRepository, adminToken string) *AuthService {
+// Claims - структура для хранения данных в токене
+type Claims struct {
+	UserID string `json:"user_id"`
+	Login  string `json:"login"`
+	jwt.RegisteredClaims
+}
+type jwtClaims struct {
+	UserID string `json:"user_id"`
+	Login  string `json:"login"`
+	jwt.RegisteredClaims
+}
+
+func NewAuthService(userRepo *repository.UserRepository, adminToken string, jwtSecret []byte) *AuthService {
+	if len(jwtSecret) == 0 {
+		panic("jwt secret cannot be empty")
+	}
+
 	return &AuthService{
 		userRepo:    userRepo,
 		adminToken:  adminToken,
+		jwtSecret:   jwtSecret,
 		tokenExpiry: 24 * time.Hour,
 	}
 }
 
 func (s *AuthService) Register(adminToken, login, password string) error {
-	uuidUser, err := generateID()
-	if err != nil {
-		return err
-	}
 	if adminToken != s.adminToken {
 		return ErrInvalidAdminToken
 	}
@@ -46,13 +73,18 @@ func (s *AuthService) Register(adminToken, login, password string) error {
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to hash password: %w", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	return s.userRepo.CreateUser(ctx, uuidUser, login, string(hashedPassword))
+	userID, err := generateID()
+	if err != nil {
+		return fmt.Errorf("failed to generate user ID: %w", err)
+	}
+
+	return s.userRepo.CreateUser(ctx, userID, login, string(hashedPassword))
 }
 
 func (s *AuthService) Authenticate(login, password string) (string, error) {
@@ -61,60 +93,104 @@ func (s *AuthService) Authenticate(login, password string) (string, error) {
 
 	user, err := s.userRepo.GetUserByLogin(ctx, login)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to get user: %w", err)
 	}
 	if user == nil {
-		return "", errors.New("user not found")
+		return "", ErrInvalidCredentials
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password)); err != nil {
-		return "", errors.New("invalid credentials")
+		return "", ErrInvalidCredentials
 	}
 
-	// Генерация токена
-	token := generateToken()
-	user.Token = token
+	// Генерация JWT токена
+	token, err := s.generateJWTToken(user.ID, user.Login)
+	if err != nil {
+		return "", fmt.Errorf("failed to generate token: %w", err)
+	}
 
-	// Сохраняем токен в БД
-	if err := s.userRepo.UpdateUserToken(ctx, user.ID, token, time.Now().Add(s.tokenExpiry)); err != nil {
-		return "", err
+	// Сохраняем время истечения токена в БД
+	expiryTime := time.Now().Add(s.tokenExpiry)
+	if err := s.userRepo.UpdateUserToken(ctx, user.ID, token, expiryTime); err != nil {
+		return "", fmt.Errorf("failed to update user token: %w", err)
 	}
 
 	return token, nil
 }
 
-func (s *AuthService) ValidateToken(token string) (*model.User, error) {
+func (s *AuthService) ValidateToken(tokenString string) (*model.User, error) {
+	claims, err := s.parseJWTToken(tokenString)
+	if err != nil {
+		return nil, fmt.Errorf("invalid token: %w", err)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	user, err := s.userRepo.GetUserByToken(ctx, token)
+	user, err := s.userRepo.GetUserByID(ctx, claims.UserID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get user: %w", err)
 	}
 	if user == nil {
-		return nil, errors.New("invalid token")
+		return nil, errors.New("user not found")
+	}
+
+	// Проверяем, что токен в БД совпадает с переданным (для возможности инвалидации)
+	if user.Token != tokenString {
+		return nil, errors.New("token mismatch")
 	}
 
 	if time.Now().After(user.TokenExpiry) {
-		return nil, errors.New("token expired")
+		return nil, ErrTokenExpired
 	}
 
 	return user, nil
 }
 
-func (s *AuthService) Logout(token string) error {
+func (s *AuthService) Logout(tokenString string) error {
+	claims, err := s.parseJWTToken(tokenString)
+	if err != nil {
+		return fmt.Errorf("invalid token: %w", err)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	user, err := s.userRepo.GetUserByToken(ctx, token)
-	if err != nil {
-		return err
-	}
-	if user == nil {
-		return errors.New("invalid token")
+	return s.userRepo.UpdateUserToken(ctx, claims.UserID, "", time.Time{})
+}
+
+func (s *AuthService) generateJWTToken(userID, login string) (string, error) {
+	claims := &jwtClaims{
+		UserID: userID,
+		Login:  login,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(s.tokenExpiry)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			Issuer:    "docs-server",
+		},
 	}
 
-	return s.userRepo.UpdateUserToken(ctx, user.ID, "", time.Time{})
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString(s.jwtSecret)
+}
+
+func (s *AuthService) parseJWTToken(tokenString string) (*jwtClaims, error) {
+	token, err := jwt.ParseWithClaims(tokenString, &jwtClaims{}, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return s.jwtSecret, nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	if claims, ok := token.Claims.(*jwtClaims); ok && token.Valid {
+		return claims, nil
+	}
+
+	return nil, errors.New("invalid token")
 }
 
 func validateLogin(login string) error {
@@ -176,8 +252,61 @@ func validatePassword(password string) error {
 
 	return nil
 }
+func generateSecureKey(length int) []byte {
+	key := make([]byte, length)
+	_, err := rand.Read(key)
+	if err != nil {
+		panic(fmt.Sprintf("failed to generate secure key: %v", err))
+	}
+	return key
+}
 
-func generateToken() string {
-	// Добавить jwt
-	return "generated-token-" + time.Now().Format("20060102150405")
+func GenerateToken(userID, login string) (string, error) {
+	// Создаем claims с данными пользователя
+	claims := &Claims{
+		UserID: userID,
+		Login:  login,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)), // Токен действителен 24 часа
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			Issuer:    "docs-server",
+		},
+	}
+
+	// Создаем токен с методом подписи HS256
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+
+	// Подписываем токен секретным ключом
+	signedToken, err := token.SignedString(jwtSecret)
+	if err != nil {
+		return "", fmt.Errorf("failed to sign token: %w", err)
+	}
+
+	return signedToken, nil
+}
+
+func ParseToken(tokenString string) (*Claims, error) {
+	// Парсим токен с нашими claims
+	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
+		// Проверяем метод подписи
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return jwtSecret, nil
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse token: %w", err)
+	}
+
+	if claims, ok := token.Claims.(*Claims); ok && token.Valid {
+		return claims, nil
+	}
+
+	return nil, fmt.Errorf("invalid token")
+}
+
+// Вспомогательная функция для генерации случайного секрета (можно использовать для инициализации)
+func GenerateRandomSecret() string {
+	return base64.StdEncoding.EncodeToString(generateSecureKey(32))
 }

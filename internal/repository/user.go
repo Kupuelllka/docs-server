@@ -34,9 +34,11 @@ func NewUserRepository(dsn string) *UserRepository {
 
 func (r *UserRepository) GetUserByID(ctx context.Context, id string) (*model.User, error) {
 	user := &model.User{}
+	var tokenExpiry []byte
+
 	err := r.db.QueryRowContext(ctx,
 		"SELECT UUID_TO_STRING(id), login, password, token, token_expiry FROM users WHERE id = UUID_TO_BIN(?)", id).
-		Scan(&user.ID, &user.Login, &user.Password, &user.Token, &user.TokenExpiry)
+		Scan(&user.ID, &user.Login, &user.Password, &user.Token, &tokenExpiry)
 
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -44,19 +46,29 @@ func (r *UserRepository) GetUserByID(ctx context.Context, id string) (*model.Use
 	if err != nil {
 		return nil, err
 	}
+
+	if len(tokenExpiry) > 0 {
+		expiryStr := string(tokenExpiry)
+		expiry, err := time.Parse("2006-01-02 15:04:05", expiryStr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse token expiry: %v", err)
+		}
+		user.TokenExpiry = expiry
+	}
+
 	return user, nil
 }
+
 func (r *UserRepository) GetUserByLogin(ctx context.Context, login string) (*model.User, error) {
 	user := &model.User{}
-
 	var (
 		token       sql.NullString
-		tokenExpiry sql.NullString // Изменено на NullString
+		tokenExpiry []byte
 		password    sql.NullString
 	)
 
 	err := r.db.QueryRowContext(ctx,
-		"SELECT id, login, password, token, token_expiry FROM users WHERE login = ?", login).
+		"SELECT UUID_TO_STRING(id), login, password, token, token_expiry FROM users WHERE login = ?", login).
 		Scan(&user.ID, &user.Login, &password, &token, &tokenExpiry)
 
 	if errors.Is(err, sql.ErrNoRows) {
@@ -66,7 +78,6 @@ func (r *UserRepository) GetUserByLogin(ctx context.Context, login string) (*mod
 		return nil, fmt.Errorf("failed to get user by login: %w", err)
 	}
 
-	// Устанавливаем поля
 	if password.Valid {
 		user.Password = password.String
 	}
@@ -74,15 +85,13 @@ func (r *UserRepository) GetUserByLogin(ctx context.Context, login string) (*mod
 		user.Token = token.String
 	}
 
-	// Парсим дату, если она есть
-	if tokenExpiry.Valid && tokenExpiry.String != "" {
-		parsedTime, err := time.Parse("2006-01-02 15:04:05", tokenExpiry.String)
+	if len(tokenExpiry) > 0 {
+		expiryStr := string(tokenExpiry)
+		expiry, err := time.Parse("2006-01-02 15:04:05", expiryStr)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse token expiry: %w", err)
+			return nil, fmt.Errorf("failed to parse token expiry: %v", err)
 		}
-		user.TokenExpiry = parsedTime
-	} else {
-		user.TokenExpiry = time.Time{}
+		user.TokenExpiry = expiry
 	}
 
 	return user, nil
@@ -101,7 +110,7 @@ func (r *UserRepository) DeleteUser(ctx context.Context, id string) error {
 
 func (r *UserRepository) ListUsers(ctx context.Context, limit, offset int) ([]*model.User, error) {
 	rows, err := r.db.QueryContext(ctx,
-		"SELECT id, login FROM users LIMIT ? OFFSET ?", limit, offset)
+		"SELECT UUID_TO_STRING(id), login FROM users LIMIT ? OFFSET ?", limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -128,12 +137,12 @@ func (r *UserRepository) CreateUser(ctx context.Context, id string, login, hashe
 
 func (r *UserRepository) GetUserByToken(ctx context.Context, token string) (*model.User, error) {
 	user := &model.User{}
-	var tokenExpiryStr sql.NullString
+	var tokenExpiry []byte
 
 	err := r.db.QueryRowContext(ctx,
 		"SELECT UUID_TO_STRING(id), login, password, token_expiry FROM users WHERE token = ?", token).
-		Scan(&user.ID, &user.Login, &user.Password, &tokenExpiryStr)
-
+		Scan(&user.ID, &user.Login, &user.Password, &tokenExpiry)
+	fmt.Println(user.ID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -141,15 +150,13 @@ func (r *UserRepository) GetUserByToken(ctx context.Context, token string) (*mod
 		return nil, fmt.Errorf("failed to get user by token: %w", err)
 	}
 
-	if tokenExpiryStr.Valid && tokenExpiryStr.String != "" {
-		// Формат зависит от вашей БД, обычно "2006-01-02 15:04:05"
-		parsedTime, err := time.Parse("2006-01-02 15:04:05", tokenExpiryStr.String)
+	if len(tokenExpiry) > 0 {
+		expiryStr := string(tokenExpiry)
+		expiry, err := time.Parse("2006-01-02 15:04:05", expiryStr)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse token expiry: %w", err)
+			return nil, fmt.Errorf("failed to parse token expiry: %v", err)
 		}
-		user.TokenExpiry = parsedTime
-	} else {
-		user.TokenExpiry = time.Time{}
+		user.TokenExpiry = expiry
 	}
 
 	return user, nil
@@ -157,8 +164,8 @@ func (r *UserRepository) GetUserByToken(ctx context.Context, token string) (*mod
 
 func (r *UserRepository) UpdateUserToken(ctx context.Context, userID string, token string, expiry time.Time) error {
 	_, err := r.db.ExecContext(ctx,
-		"UPDATE users SET token = ?, token_expiry = ? WHERE id = ?",
-		token, expiry, userID)
+		"UPDATE users SET token = ?, token_expiry = ? WHERE id = UUID_TO_BIN(?)",
+		token, expiry.Format("2006-01-02 15:04:05"), userID)
 	return err
 }
 

@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"docs-server/internal/model"
+	"encoding/json"
+	"fmt"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -33,44 +35,60 @@ func NewDocumentRepository(dsn string) *DocumentRepository {
 }
 
 func (r *DocumentRepository) CreateDocument(ctx context.Context, doc *model.Document) error {
-	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO documents 
-		(id, name, mime, is_file, is_public, created_at, owner_id, file_path, json_data) 
-		VALUES (UUID_TO_BIN(?), ?, ?, ?, ?, ?, UUID_TO_BIN(?), ?, ?)`,
+	var jsonData []byte
+	var err error
+	if doc.JSONData != nil {
+		jsonData, err = json.Marshal(doc.JSONData)
+		if err != nil {
+			return fmt.Errorf("failed to marshal JSON data: %v", err)
+		}
+	}
+
+	_, err = r.db.ExecContext(ctx, `
+        INSERT INTO documents 
+        (id, name, mime, is_file, is_public, created_at, owner_id, file_path, json_data) 
+        VALUES (UUID_TO_BIN(?), ?, ?, ?, ?, ?, UUID_TO_BIN(?), ?, ?)`,
 		doc.ID, doc.Name, doc.Mime, doc.File, doc.Public,
-		doc.Created, doc.Owner, doc.FilePath, doc.JSONData)
+		doc.Created, doc.Owner, doc.FilePath, jsonData)
 	return err
 }
 
 func (r *DocumentRepository) GetDocumentByID(ctx context.Context, id string) (*model.Document, error) {
 	doc := &model.Document{}
-	var idStr, ownerStr string
+	var createdAtBytes []byte
 
 	err := r.db.QueryRowContext(ctx, `
-		SELECT 
-			UUID_TO_STRING(id), name, mime, is_file, is_public, 
-			created_at, file_path, json_data, UUID_TO_STRING(owner_id)
-		FROM documents WHERE id = UUID_TO_BIN(?)`, id).
-		Scan(&idStr, &doc.Name, &doc.Mime, &doc.File, &doc.Public,
-			&doc.Created, &doc.FilePath, &doc.JSONData, &ownerStr)
+        SELECT 
+            UUID_TO_STRING(id), name, mime, is_file, is_public, 
+            created_at, file_path, json_data, UUID_TO_STRING(owner_id)
+        FROM documents WHERE id = UUID_TO_BIN(?)`, id).
+		Scan(&doc.ID, &doc.Name, &doc.Mime, &doc.File, &doc.Public,
+			&createdAtBytes, &doc.FilePath, &doc.JSONData, &doc.Owner)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, nil // Документ не найден - не ошибка
+			return nil, nil
 		}
 		return nil, err
 	}
+
+	createdAtStr := string(createdAtBytes)
+	createdAt, err := time.Parse("2006-01-02 15:04:05", createdAtStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse created_at: %v", err)
+	}
+	doc.Created = createdAt
 
 	return doc, nil
 }
 
 func (r *DocumentRepository) GetUserDocuments(ctx context.Context, userid string, limit int) ([]*model.Document, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT 
-			UUID_TO_STRING(id), name, mime, is_file, is_public, created_at
-		FROM documents 
-		WHERE owner_id = UUID_TO_BIN(?)
-		ORDER BY name, created_at
-		LIMIT ?`, userid, limit)
+        SELECT 
+            UUID_TO_STRING(id), name, mime, is_file, is_public, created_at
+        FROM documents 
+        WHERE owner_id = UUID_TO_BIN(?)
+        ORDER BY name, created_at
+        LIMIT ?`, userid, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -79,9 +97,26 @@ func (r *DocumentRepository) GetUserDocuments(ctx context.Context, userid string
 	var docs []*model.Document
 	for rows.Next() {
 		doc := &model.Document{}
-		if err := rows.Scan(&doc.ID, &doc.Name, &doc.Mime, &doc.File, &doc.Public, &doc.Created); err != nil {
+		var createdAtBytes []byte
+
+		if err := rows.Scan(
+			&doc.ID,
+			&doc.Name,
+			&doc.Mime,
+			&doc.File,
+			&doc.Public,
+			&createdAtBytes,
+		); err != nil {
 			return nil, err
 		}
+
+		createdAtStr := string(createdAtBytes)
+		createdAt, err := time.Parse("2006-01-02 15:04:05", createdAtStr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse created_at: %v", err)
+		}
+		doc.Created = createdAt
+
 		docs = append(docs, doc)
 	}
 
@@ -91,7 +126,65 @@ func (r *DocumentRepository) GetUserDocuments(ctx context.Context, userid string
 
 	return docs, nil
 }
+func (r *DocumentRepository) GetSharedDocuments(ctx context.Context, currentUserID, ownerID string, limit int) ([]*model.Document, error) {
+	rows, err := r.db.QueryContext(ctx, `
+        SELECT 
+            UUID_TO_STRING(d.id), 
+            d.name, 
+            d.mime, 
+            d.is_file, 
+            d.is_public, 
+            d.created_at,
+            d.file_path,
+            d.json_data,
+            UUID_TO_STRING(d.owner_id)
+        FROM documents d
+        LEFT JOIN document_grants g ON d.id = g.document_id
+        WHERE d.owner_id = UUID_TO_BIN(?)
+        AND (d.is_public = TRUE OR g.user_id = UUID_TO_BIN(?))
+        ORDER BY d.name, d.created_at
+        LIMIT ?`, ownerID, currentUserID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
 
+	var docs []*model.Document
+	for rows.Next() {
+		doc := &model.Document{}
+		var createdAtBytes []byte
+
+		err := rows.Scan(
+			&doc.ID,
+			&doc.Name,
+			&doc.Mime,
+			&doc.File,
+			&doc.Public,
+			&createdAtBytes,
+			&doc.FilePath,
+			&doc.JSONData,
+			&doc.Owner,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		createdAtStr := string(createdAtBytes)
+		createdAt, err := time.Parse("2006-01-02 15:04:05", createdAtStr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse created_at: %v", err)
+		}
+		doc.Created = createdAt
+
+		docs = append(docs, doc)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return docs, nil
+}
 func (r *DocumentRepository) DeleteDocument(ctx context.Context, id string) error {
 	_, err := r.db.ExecContext(ctx, "DELETE FROM documents WHERE id = UUID_TO_BIN(?)", id)
 	return err

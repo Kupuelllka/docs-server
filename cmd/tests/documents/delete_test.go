@@ -15,7 +15,16 @@ func TestDeleteDocument_Success(t *testing.T) {
 	token := testutils.TestToken
 
 	// Сначала загружаем документ для теста
-	meta := `{"name":"testfile.txt","public":false,"mime":"text/plain"}`
+	meta := `{
+			"name": "testfile.txt",
+			"file": true,
+			"public": false,
+			"mime": "text/plain",
+			"grant": ["testuser", "user2"],
+			"json": {"description": "test file", "version": 1},
+			"token": "` + token + `"
+		}`
+
 	body, contentType := testutils.CreateMultipartRequest(meta, "testfile.txt", "test content")
 
 	uploadReq := httptest.NewRequest("POST", "/api/docs", body)

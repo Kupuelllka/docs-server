@@ -11,19 +11,29 @@ import (
 	"log"
 	"net/http/httptest"
 	"os"
+	"sync"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 )
 
-var TestApp *fiber.App
-var TestToken string
+var (
+	TestApp   *fiber.App
+	TestToken string
+	TestLogin = "testuser" // Фиксированный логин для тестов
+	TestPass  = "Secur3P@ss"
+	initOnce  sync.Once
+)
 
 func init() {
-	// Инициализация тестового приложения
-	TestApp = createTestApp()
-	TestToken = getTestToken(TestApp)
+	initOnce.Do(func() {
+		// Инициализация тестового приложения
+		TestApp = createTestApp()
+		// Регистрация и аутентификация тестового пользователя
+		registerTestUser(TestApp)
+		TestToken = getTestToken(TestLogin, TestApp)
+	})
 }
 
 func Cleanup() {
@@ -40,7 +50,7 @@ func createTestApp() *fiber.App {
 	docRepo := repository.NewDocumentRepository(cfg.Database.DSN)
 	cache := cache.NewMemoryCache()
 
-	authService := service.NewAuthService(userRepo, cfg.Auth.AdminToken)
+	authService := service.NewAuthService(userRepo, cfg.Auth.AdminToken, []byte(cfg.Auth.JWTSecret))
 	docService := service.NewDocumentService(docRepo, userRepo, cache, cfg.Storage.UploadDir)
 	userService := service.NewUserService(userRepo)
 
@@ -68,27 +78,29 @@ func createTestApp() *fiber.App {
 	return application
 }
 
-func getTestToken(app *fiber.App) string {
-	// Регистрация тестового пользователя
+func registerTestUser(app *fiber.App) {
+	// Регистрация тестового пользователя (если еще не существует)
 	regBody := map[string]string{
 		"token": "secure-admin-token-123",
-		"login": "testuser",
-		"pswd":  "Secur3P@ss",
+		"login": TestLogin,
+		"pswd":  TestPass,
 	}
 	jsonBody, _ := json.Marshal(regBody)
 
 	req := httptest.NewRequest("POST", "/api/register", bytes.NewBuffer(jsonBody))
 	req.Header.Set("Content-Type", "application/json")
 	app.Test(req)
+}
 
+func getTestToken(login string, app *fiber.App) string {
 	// Аутентификация
 	authBody := map[string]string{
-		"login": "testuser",
-		"pswd":  "Secur3P@ss",
+		"login": login,
+		"pswd":  TestPass,
 	}
-	jsonBody, _ = json.Marshal(authBody)
+	jsonBody, _ := json.Marshal(authBody)
 
-	req = httptest.NewRequest("POST", "/api/auth", bytes.NewBuffer(jsonBody))
+	req := httptest.NewRequest("POST", "/api/auth", bytes.NewBuffer(jsonBody))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, _ := app.Test(req)

@@ -3,6 +3,7 @@ package documents_test
 import (
 	"docs-server/cmd/tests/testutils"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -13,8 +14,14 @@ import (
 func TestUploadDocument_Success(t *testing.T) {
 	app := testutils.TestApp
 	token := testutils.TestToken
+	meta := `{
+        "name": "testfile.txt",
+        "public": false,
+        "mime": "text/plain",
+        "grant": ["user1", "user2"],
+        "json": {"description": "test file", "version": 1}
+    }`
 
-	meta := `{"name":"testfile.txt","public":false,"mime":"text/plain"}`
 	body, contentType := testutils.CreateMultipartRequest(meta, "testfile.txt", "test content")
 
 	req := httptest.NewRequest("POST", "/api/docs", body)
@@ -33,6 +40,7 @@ func TestUploadDocument_Success(t *testing.T) {
 
 	data, ok := result["data"].(map[string]interface{})
 	assert.True(t, ok)
+	fmt.Printf("DATA: %v", data)
 	_, ok = data["file"].(string)
 	assert.True(t, ok)
 	_, ok = data["json"].(map[string]interface{})
