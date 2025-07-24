@@ -13,6 +13,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 
+	"docs-server/internal/cache"
 	"docs-server/internal/model"
 	"docs-server/internal/repository"
 )
@@ -31,6 +32,7 @@ type AuthService struct {
 	adminToken  string
 	jwtSecret   []byte
 	tokenExpiry time.Duration
+	tokenCache  *cache.MemoryCache // Кеш для токенов
 }
 
 // Claims - структура для хранения данных в токене
@@ -45,7 +47,12 @@ type jwtClaims struct {
 	jwt.RegisteredClaims
 }
 
-func NewAuthService(userRepo *repository.UserRepository, adminToken string, jwtSecret []byte) *AuthService {
+func NewAuthService(
+	userRepo *repository.UserRepository,
+	adminToken string,
+	jwtSecret []byte,
+	tokenCache *cache.MemoryCache,
+) *AuthService {
 	if len(jwtSecret) == 0 {
 		panic("jwt secret cannot be empty")
 	}
@@ -55,6 +62,7 @@ func NewAuthService(userRepo *repository.UserRepository, adminToken string, jwtS
 		adminToken:  adminToken,
 		jwtSecret:   jwtSecret,
 		tokenExpiry: 24 * time.Hour,
+		tokenCache:  tokenCache,
 	}
 }
 
@@ -91,6 +99,14 @@ func (s *AuthService) Authenticate(login, password string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	// Проверяем кеш перед обращением к БД
+	cacheKey := "auth_" + login
+	if cachedToken, found := s.tokenCache.Get(cacheKey); found {
+		if token, ok := cachedToken.(string); ok {
+			return token, nil
+		}
+	}
+
 	user, err := s.userRepo.GetUserByLogin(ctx, login)
 	if err != nil {
 		return "", fmt.Errorf("failed to get user: %w", err)
@@ -103,22 +119,30 @@ func (s *AuthService) Authenticate(login, password string) (string, error) {
 		return "", ErrInvalidCredentials
 	}
 
-	// Генерация JWT токена
 	token, err := s.generateJWTToken(user.ID, user.Login)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate token: %w", err)
 	}
 
-	// Сохраняем время истечения токена в БД
 	expiryTime := time.Now().Add(s.tokenExpiry)
 	if err := s.userRepo.UpdateUserToken(ctx, user.ID, token, expiryTime); err != nil {
 		return "", fmt.Errorf("failed to update user token: %w", err)
 	}
 
+	// Сохраняем токен в кеш
+	s.tokenCache.Set(cacheKey, token, s.tokenExpiry)
+
 	return token, nil
 }
-
 func (s *AuthService) ValidateToken(tokenString string) (*model.User, error) {
+	// Проверяем кеш перед валидацией токена
+	cacheKey := "token_" + tokenString
+	if cachedUser, found := s.tokenCache.Get(cacheKey); found {
+		if user, ok := cachedUser.(*model.User); ok {
+			return user, nil
+		}
+	}
+
 	claims, err := s.parseJWTToken(tokenString)
 	if err != nil {
 		return nil, fmt.Errorf("invalid token: %w", err)
@@ -135,7 +159,6 @@ func (s *AuthService) ValidateToken(tokenString string) (*model.User, error) {
 		return nil, errors.New("user not found")
 	}
 
-	// Проверяем, что токен в БД совпадает с переданным (для возможности инвалидации)
 	if user.Token != tokenString {
 		return nil, errors.New("token mismatch")
 	}
@@ -144,9 +167,11 @@ func (s *AuthService) ValidateToken(tokenString string) (*model.User, error) {
 		return nil, ErrTokenExpired
 	}
 
+	// Сохраняем пользователя в кеш
+	s.tokenCache.Set(cacheKey, user, time.Until(user.TokenExpiry))
+
 	return user, nil
 }
-
 func (s *AuthService) Logout(tokenString string) error {
 	claims, err := s.parseJWTToken(tokenString)
 	if err != nil {
@@ -155,6 +180,10 @@ func (s *AuthService) Logout(tokenString string) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+
+	// Инвалидируем кеш
+	s.tokenCache.Delete("auth_" + claims.Login)
+	s.tokenCache.Delete("token_" + tokenString)
 
 	return s.userRepo.UpdateUserToken(ctx, claims.UserID, "", time.Time{})
 }

@@ -32,7 +32,7 @@ func main() {
 	cache := cache.NewMemoryCache()
 
 	// Инициализация сервисов
-	authService := service.NewAuthService(userRepo, cfg.Auth.AdminToken, []byte(cfg.Auth.JWTSecret))
+	authService := service.NewAuthService(userRepo, cfg.Auth.AdminToken, []byte(cfg.Auth.JWTSecret), cache)
 	docService := service.NewDocumentService(docRepo, userRepo, cache, cfg.Storage.UploadDir)
 	userService := service.NewUserService(userRepo)
 

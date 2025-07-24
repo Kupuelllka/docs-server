@@ -50,7 +50,7 @@ func createTestApp() *fiber.App {
 	docRepo := repository.NewDocumentRepository(cfg.Database.DSN)
 	cache := cache.NewMemoryCache()
 
-	authService := service.NewAuthService(userRepo, cfg.Auth.AdminToken, []byte(cfg.Auth.JWTSecret))
+	authService := service.NewAuthService(userRepo, cfg.Auth.AdminToken, []byte(cfg.Auth.JWTSecret), cache)
 	docService := service.NewDocumentService(docRepo, userRepo, cache, cfg.Storage.UploadDir)
 	userService := service.NewUserService(userRepo)
 
