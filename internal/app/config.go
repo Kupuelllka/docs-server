@@ -61,9 +61,9 @@ func NewConfig() (*Config, error) {
 
 	// Пути к возможным расположениям конфигурационных файлов
 	configPaths := []string{
-		"../../docs-server/prod.yml",          // В текущей директории
-		"/etc/docs-server/config.yml",         // Общий системный конфиг
-		filepath.Join("config", "config.yml"), // В папке config
+		"../../docs-server/prod.yml",        // В текущей директории
+		"/etc/docs-server/prod.yml",         // Общий системный конфиг
+		filepath.Join("config", "prod.yml"), // В папке config
 	}
 
 	// Попробуем найти и загрузить конфигурационный файл

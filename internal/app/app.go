@@ -27,7 +27,7 @@ func NewApp(fiberApp *fiber.App, cfg *Config) (*App, error) {
 	// Инициализация кеша
 	cache := cache.NewMemoryCache()
 	// Инициализация сервисов
-	authService := service.NewAuthService(userRepo, cfg.Auth.AdminToken, []byte(cfg.Auth.JWTSecret))
+	authService := service.NewAuthService(userRepo, cfg.Auth.AdminToken, []byte(cfg.Auth.JWTSecret), cache)
 	userService := service.NewUserService(userRepo)
 	docService := service.NewDocumentService(docRepo, userRepo, cache, cfg.Storage.UploadDir)
 
