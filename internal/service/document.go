@@ -5,7 +5,10 @@ import (
 	"docs-server/internal/cache"
 	"docs-server/internal/model"
 	"docs-server/internal/repository"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"mime"
 	"os"
 	"path/filepath"
 	"time"
@@ -45,43 +48,83 @@ func (s *DocumentService) UploadDocument(token string, meta string, files []*mod
 	}
 
 	// 2. Парсинг метаданных
-	// (Добавить парсинга JSON из строки meta)
+	var metaData struct {
+		Name   string      `json:"name"`
+		Public bool        `json:"public"`
+		Mime   string      `json:"mime"`
+		Grant  []string    `json:"grant"`
+		JSON   interface{} `json:"json"`
+	}
+
+	if err := json.Unmarshal([]byte(meta), &metaData); err != nil {
+		return nil, fmt.Errorf("invalid meta format: %v", err)
+	}
+
+	// Валидация обязательных полей
+	if metaData.Name == "" {
+		return nil, errors.New("document name is required")
+	}
 
 	// 3. Сохранение файла (если есть)
 	var filePath string
+	var fileName string
 	if len(files) > 0 {
-		uploadDir := "uploads"
-		if err := os.MkdirAll(uploadDir, 0755); err != nil {
-			return nil, err
+		// Автоматическое определение MIME-типа для файлов
+		if metaData.Mime == "" {
+			metaData.Mime = mime.TypeByExtension(filepath.Ext(files[0].Filename))
+			if metaData.Mime == "" {
+				metaData.Mime = "application/octet-stream"
+			}
 		}
 
-		file := files[0]
-		filePath = filepath.Join(uploadDir, file.Filename)
-		if err := os.WriteFile(filePath, file.Data, 0644); err != nil {
-			return nil, err
+		// Создаем директорию для загрузки
+		if err := os.MkdirAll(s.uploadDir, 0755); err != nil {
+			return nil, fmt.Errorf("failed to create upload directory: %v", err)
+		}
+
+		// Генерируем уникальное имя файла
+		fileExt := filepath.Ext(files[0].Filename)
+		fileName = uuid.New().String() + fileExt
+		filePath = filepath.Join(s.uploadDir, fileName)
+
+		// Сохраняем файл
+		if err := os.WriteFile(filePath, files[0].Data, 0644); err != nil {
+			return nil, fmt.Errorf("failed to save file: %v", err)
+		}
+	} else {
+		// Для JSON-документов
+		if metaData.Mime == "" {
+			metaData.Mime = "application/json"
 		}
 	}
-	// генерим uuid
-	uuid, err := generateID()
+
+	// 4. Генерация id
+	docID, err := generateID()
 	if err != nil {
 		return nil, err
 	}
-	// 4. Создание документа
+
+	// 5. Создание документа
 	doc := &model.Document{
-		ID:       uuid,
-		Name:     "example",                  // Добавить из meta
-		Mime:     "application/octet-stream", // Добавить из meta или файла
+		ID:       docID,
+		Name:     metaData.Name,
+		Mime:     metaData.Mime,
 		File:     len(files) > 0,
-		Public:   false, // Добавить из meta
+		Public:   metaData.Public,
 		Created:  time.Now(),
 		Owner:    user.ID,
 		FilePath: filePath,
-		JSONData: nil, // Добавить из meta или отдельного поля
+		JSONData: metaData.JSON,
+		Grant:    metaData.Grant,
 	}
 
 	// 5. Сохранение в БД
 	if err := s.docRepo.CreateDocument(context.Background(), doc); err != nil {
-		return nil, err
+		// Удаляем сохраненный файл в случае ошибки
+		if filePath != "" {
+			os.Remove(filePath)
+		}
+		return nil, fmt.Errorf("failed to create document: %v", err)
 	}
 
 	// 6. Инвалидация кеша
@@ -109,11 +152,26 @@ func (s *DocumentService) GetDocumentsList(token, login, key, value string, limi
 	// 3. Получение документов из БД
 	var docs []*model.Document
 	if login == "" || login == user.Login {
-		// Документы пользователя
+		// Собственные документы пользователя
 		docs, err = s.docRepo.GetUserDocuments(context.Background(), user.ID, limit)
+		if err != nil {
+			return nil, err
+		}
+
+		// Сохраняем в кеш только свои документы
+		s.cache.Set(cacheKey, docs, 5*time.Minute)
 	} else {
-		// Добавить обработку документов другого пользователя (с проверкой прав доступа)
-		// (дополнительная реализация)
+		// Документы другого пользователя
+		otherUser, err := s.userRepo.GetUserByLogin(context.Background(), login)
+		if err != nil {
+			return nil, fmt.Errorf("user not found")
+		}
+
+		// Получаем только публичные документы или документы с доступом для текущего пользователя
+		docs, err = s.docRepo.GetSharedDocuments(context.Background(), user.ID, otherUser.ID, limit)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if err != nil {
@@ -132,6 +190,7 @@ func (s *DocumentService) GetDocument(token, id string) (*model.Document, error)
 	if err != nil {
 		return nil, err
 	}
+
 	if user == nil {
 		return nil, errors.New("unauthorized")
 	}
@@ -149,7 +208,21 @@ func (s *DocumentService) GetDocument(token, id string) (*model.Document, error)
 	}
 
 	// 4. Проверка прав доступа
-	if doc.Owner != user.ID && !doc.Public {
+	hasAccess := false
+	if doc.Owner == user.ID {
+		hasAccess = true
+	} else if doc.Public {
+		hasAccess = true
+	} else {
+		for _, grant := range doc.Grant {
+			if grant == user.Login {
+				hasAccess = true
+				break
+			}
+		}
+	}
+
+	if !hasAccess {
 		return nil, errors.New("forbidden")
 	}
 
@@ -197,11 +270,11 @@ func (s *DocumentService) DeleteDocument(token, id string) (bool, error) {
 	return true, nil
 }
 
+// generateID создает новый UUID версии 7
 func generateID() (string, error) {
-	// Добавить реализацию генерации UUID
-	uuid, err := uuid.NewV7()
+	id, err := uuid.NewV7()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to generate UUID: %w", err)
 	}
-	return uuid.String(), nil
+	return id.String(), nil
 }
