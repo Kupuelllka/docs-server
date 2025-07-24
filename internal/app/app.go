@@ -50,7 +50,7 @@ func (a *App) setupRoutes(authCtrl *controller.AuthController, docsCtrl *control
 	api.Delete("/auth/:token", authCtrl.Logout)
 
 	// Маршруты для документы
-	docs := api.Group("/docs", controller.AuthMiddleware(*authCtrl.GetAuthService()))
+	docs := api.Group("/docs", controller.AuthMiddleware(authCtrl.GetAuthService()))
 	docs.Post("/", docsCtrl.UploadDocument)
 	docs.Get("/", docsCtrl.GetDocumentsList)
 	docs.Get("/:id", docsCtrl.GetDocument)

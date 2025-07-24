@@ -189,12 +189,11 @@ func (s *DocumentService) GetDocument(token, id string) (*model.Document, error)
 	if err != nil {
 		return nil, err
 	}
-
 	// Проверка прав доступа
 	hasAccess := doc.Owner == user.ID || doc.Public
 	if !hasAccess {
 		for _, grant := range doc.Grant {
-			if grant == user.Login {
+			if grant == user.ID {
 				hasAccess = true
 				break
 			}
