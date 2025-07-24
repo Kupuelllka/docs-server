@@ -16,6 +16,18 @@ import (
 	"github.com/google/uuid"
 )
 
+var (
+	ErrInvalidToken         = errors.New("unauthorized: invalid token")
+	ErrDocumentNameRequired = errors.New("document name is required")
+	ErrUserNotFound         = errors.New("user not found")
+	ErrForbidden            = errors.New("forbidden")
+	ErrNotDocumentOwner     = errors.New("forbidden: not document owner")
+	ErrFailedToCreateDir    = errors.New("failed to create upload directory")
+	ErrFailedToSaveFile     = errors.New("failed to save file")
+	ErrFailedToDeleteFile   = errors.New("failed to delete file")
+	ErrInvalidMetaFormat    = errors.New("invalid meta format")
+)
+
 type DocumentService struct {
 	docRepo   *repository.DocumentRepository
 	userRepo  *repository.UserRepository
@@ -44,7 +56,7 @@ func (s *DocumentService) getUserFromToken(token string) (*model.User, error) {
 		return nil, fmt.Errorf("failed to get user from token: %w", err)
 	}
 	if user == nil {
-		return nil, errors.New("unauthorized: invalid token")
+		return nil, ErrInvalidToken
 	}
 	return user, nil
 }
@@ -66,12 +78,12 @@ func (s *DocumentService) UploadDocument(token string, meta string, files []*mod
 	}
 
 	if err := json.Unmarshal([]byte(meta), &metaData); err != nil {
-		return nil, fmt.Errorf("invalid meta format: %v", err)
+		return nil, fmt.Errorf("%w: %v", ErrInvalidMetaFormat, err)
 	}
 
 	// Валидация
 	if metaData.Name == "" {
-		return nil, errors.New("document name is required")
+		return nil, ErrDocumentNameRequired
 	}
 
 	// Обработка файла
@@ -87,7 +99,7 @@ func (s *DocumentService) UploadDocument(token string, meta string, files []*mod
 
 		// Создание директории
 		if err := os.MkdirAll(s.uploadDir, 0755); err != nil {
-			return nil, fmt.Errorf("failed to create upload directory: %v", err)
+			return nil, fmt.Errorf("%w: %v", ErrFailedToCreateDir, err)
 		}
 
 		// Генерация имени файла
@@ -97,7 +109,7 @@ func (s *DocumentService) UploadDocument(token string, meta string, files []*mod
 
 		// Сохранение файла
 		if err := os.WriteFile(filePath, files[0].Data, 0644); err != nil {
-			return nil, fmt.Errorf("failed to save file: %v", err)
+			return nil, fmt.Errorf("%w: %v", ErrFailedToSaveFile, err)
 		}
 	} else if metaData.Mime == "" {
 		metaData.Mime = "application/json"
@@ -160,7 +172,7 @@ func (s *DocumentService) GetDocumentsList(token, login, key, value string, limi
 		// Документы другого пользователя
 		otherUser, err := s.userRepo.GetUserByLogin(context.Background(), login)
 		if err != nil {
-			return nil, fmt.Errorf("user not found")
+			return nil, ErrUserNotFound
 		}
 
 		docs, err = s.docRepo.GetSharedDocuments(context.Background(), user.ID, otherUser.ID, limit)
@@ -194,7 +206,7 @@ func (s *DocumentService) GetDocument(token, id string) (*model.Document, error)
 	hasAccess := doc.Owner == user.ID || doc.Public
 	if !hasAccess {
 		for _, grant := range doc.Grant {
-			if grant == user.Login {
+			if grant == user.ID {
 				hasAccess = true
 				break
 			}
@@ -202,7 +214,7 @@ func (s *DocumentService) GetDocument(token, id string) (*model.Document, error)
 	}
 
 	if !hasAccess {
-		return nil, errors.New("forbidden")
+		return nil, ErrForbidden
 	}
 
 	// Сохранение в кеш
@@ -223,13 +235,13 @@ func (s *DocumentService) DeleteDocument(token, id string) (bool, error) {
 		return false, err
 	}
 	if doc.Owner != user.ID {
-		return false, errors.New("forbidden: not document owner")
+		return false, ErrNotDocumentOwner
 	}
 
 	// Удаление файла
 	if doc.File && doc.FilePath != "" {
 		if err := os.Remove(doc.FilePath); err != nil {
-			return false, fmt.Errorf("failed to delete file: %w", err)
+			return false, fmt.Errorf("%w: %v", ErrFailedToDeleteFile, err)
 		}
 	}
 
@@ -246,7 +258,7 @@ func (s *DocumentService) DeleteDocument(token, id string) (bool, error) {
 }
 
 func generateID() (string, error) {
-	id, err := uuid.NewV7()
+	id, err := uuid.NewRandom()
 	if err != nil {
 		return "", fmt.Errorf("failed to generate UUID: %w", err)
 	}

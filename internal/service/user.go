@@ -7,6 +7,14 @@ import (
 	"errors"
 )
 
+var (
+	ErrUserIDEmpty   = errors.New("user ID cannot be empty")
+	ErrLoginEmpty    = errors.New("login cannot be empty")
+	ErrUserNil       = errors.New("user cannot be nil")
+	ErrInvalidLimit  = errors.New("limit must be positive")
+	ErrInvalidOffset = errors.New("offset cannot be negative")
+)
+
 type UserService struct {
 	userRepo *repository.UserRepository
 }
@@ -20,7 +28,7 @@ func NewUserService(userRepo *repository.UserRepository) *UserService {
 // GetUserByID возвращает пользователя по ID
 func (s *UserService) GetUserByID(ctx context.Context, id string) (*model.User, error) {
 	if id == "" {
-		return nil, errors.New("user ID cannot be empty")
+		return nil, ErrUserIDEmpty
 	}
 
 	user, err := s.userRepo.GetUserByID(ctx, id)
@@ -28,7 +36,7 @@ func (s *UserService) GetUserByID(ctx context.Context, id string) (*model.User, 
 		return nil, err
 	}
 	if user == nil {
-		return nil, errors.New("user not found")
+		return nil, ErrUserNotFound
 	}
 
 	return user, nil
@@ -37,7 +45,7 @@ func (s *UserService) GetUserByID(ctx context.Context, id string) (*model.User, 
 // GetUserByLogin возвращает пользователя по логину
 func (s *UserService) GetUserByLogin(ctx context.Context, login string) (*model.User, error) {
 	if login == "" {
-		return nil, errors.New("login cannot be empty")
+		return nil, ErrLoginEmpty
 	}
 
 	user, err := s.userRepo.GetUserByLogin(ctx, login)
@@ -45,7 +53,7 @@ func (s *UserService) GetUserByLogin(ctx context.Context, login string) (*model.
 		return nil, err
 	}
 	if user == nil {
-		return nil, errors.New("user not found")
+		return nil, ErrUserNotFound
 	}
 
 	return user, nil
@@ -54,10 +62,10 @@ func (s *UserService) GetUserByLogin(ctx context.Context, login string) (*model.
 // UpdateUser обновляет данные пользователя
 func (s *UserService) UpdateUser(ctx context.Context, user *model.User) error {
 	if user == nil {
-		return errors.New("user cannot be nil")
+		return ErrUserNil
 	}
 	if user.ID == "" {
-		return errors.New("user ID cannot be empty")
+		return ErrUserIDEmpty
 	}
 
 	// Проверяем, существует ли пользователь
@@ -66,7 +74,7 @@ func (s *UserService) UpdateUser(ctx context.Context, user *model.User) error {
 		return err
 	}
 	if existingUser == nil {
-		return errors.New("user not found")
+		return ErrUserNotFound
 	}
 
 	// Обновляем только разрешенные поля
@@ -78,7 +86,7 @@ func (s *UserService) UpdateUser(ctx context.Context, user *model.User) error {
 // DeleteUser удаляет пользователя по ID
 func (s *UserService) DeleteUser(ctx context.Context, id string) error {
 	if id == "" {
-		return errors.New("user ID cannot be empty")
+		return ErrUserIDEmpty
 	}
 
 	// Проверяем, существует ли пользователь
@@ -87,7 +95,7 @@ func (s *UserService) DeleteUser(ctx context.Context, id string) error {
 		return err
 	}
 	if user == nil {
-		return errors.New("user not found")
+		return ErrUserNotFound
 	}
 
 	return s.userRepo.DeleteUser(ctx, id)
@@ -96,10 +104,10 @@ func (s *UserService) DeleteUser(ctx context.Context, id string) error {
 // ListUsers возвращает список пользователей с пагинацией
 func (s *UserService) ListUsers(ctx context.Context, limit, offset int) ([]*model.User, error) {
 	if limit <= 0 {
-		limit = 10
+		return nil, ErrInvalidLimit
 	}
 	if offset < 0 {
-		offset = 0
+		return nil, ErrInvalidOffset
 	}
 
 	return s.userRepo.ListUsers(ctx, limit, offset)
