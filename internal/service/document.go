@@ -26,6 +26,9 @@ var (
 	ErrFailedToSaveFile     = errors.New("failed to save file")
 	ErrFailedToDeleteFile   = errors.New("failed to delete file")
 	ErrInvalidMetaFormat    = errors.New("invalid meta format")
+	ErrDocumentNotFound     = errors.New("document not found")
+	ErrPermissionDenied     = errors.New("permission denied")
+	ErrInvalidDocumentData  = errors.New("invalid document data")
 )
 
 type DocumentService struct {
