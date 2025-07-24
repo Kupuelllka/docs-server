@@ -19,7 +19,7 @@ func TestUploadDocument_Success(t *testing.T) {
         "name": "testfile.txt",
         "public": false,
         "mime": "text/plain",
-        "grant": ["user1", "user2"],
+        "grant": ["testuser1", "testuser2"],
         "json": {"description": "test file", "version": 1}
     }`
 
@@ -61,7 +61,7 @@ func TestUploadDocument_ImageFile(t *testing.T) {
         "name": "testimage.jpg",
         "public": true,
         "mime": "image/jpeg",
-        "grant": ["user1"],
+        "grant": ["testuser1"],
         "json": {"title": "test image", "category": "photos"}
     }`
 
@@ -107,7 +107,7 @@ func TestUploadDocument_PDFFile(t *testing.T) {
         "name": "testdoc.pdf",
         "public": false,
         "mime": "application/pdf",
-        "grant": ["user1", "user2"],
+        "grant": ["testuser1", "testuser2"],
         "json": {"title": "Test Document", "pages": 10}
     }`
 
@@ -149,7 +149,7 @@ func TestUploadDocument_ExcelFile(t *testing.T) {
         "name": "financial_report.xls",
         "public": false,
         "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "grant": ["accounting"],
+        "grant": ["testuser1"],
         "json": {"report_type": "quarterly", "year": 2023}
     }`
 

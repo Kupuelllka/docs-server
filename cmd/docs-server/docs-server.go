@@ -40,7 +40,6 @@ func main() {
 	application := fiber.New(fiber.Config{
 		ErrorHandler: app.ErrorHandler,
 	})
-
 	// Middleware
 	application.Use(recover.New())
 	application.Use(logger.New())
@@ -52,11 +51,13 @@ func main() {
 
 	// Настройка маршрутов
 	api := application.Group("/api")
+	api.Use(controller.AuthErrorHandler)
 	api.Post("/register", authController.Register)
 	api.Post("/auth", authController.Authenticate)
 	api.Delete("/auth/:token", authController.Logout)
 
-	docs := api.Group("/docs", controller.AuthMiddleware(*authService))
+	docs := api.Group("/docs", controller.AuthMiddleware(authService))
+	docs.Use(controller.DocsErrorHandler)
 	docs.Post("/", docsController.UploadDocument)
 	docs.Get("/", docsController.GetDocumentsList)
 	docs.Get("/:id", docsController.GetDocument)

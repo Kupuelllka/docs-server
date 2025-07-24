@@ -20,7 +20,7 @@ func TestDeleteDocument_Success(t *testing.T) {
         "file": true,
         "public": false,
         "mime": "text/plain",
-        "grant": ["testuser", "user2"],
+        "grant": ["testuser1", "testuser2"],
         "json": {"description": "test file", "version": 1},
         "token": "` + token + `"
     }`
